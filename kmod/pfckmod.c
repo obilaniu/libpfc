@@ -22,6 +22,7 @@
 #define MSR_IA32_PERF_GLOBAL_CTRL          0x38F
 #define MSR_IA32_PERF_GLOBAL_OVF_CTRL      0x390
 #define MSR_IA32_A_PMC0                    0x4C1
+#define IA32_PERF_CAPABILITIES             0x345
 
 
 /* Forward Declarations */
@@ -64,6 +65,7 @@ static int       pmcStartGp           = 0;
 static int       pmcEndGp             = 0;
 static uint64_t  pmcMaskFf            = 0;
 static uint64_t  pmcMaskGp            = 0;
+static int       fullWidthWrites      = 0;
 
 /**
  * The counters consist in the following MSRs on Core i7:
@@ -205,8 +207,10 @@ static void pfcWRMSR(uint64_t addr, uint64_t newVal){
 	 * corresponding bits are reserved.
 	 */
 	
-	if(      addr >= MSR_IA32_A_PMC0               &&
-	         addr <  MSR_IA32_A_PMC0+pmcGp         ){
+	if(     (addr >= MSR_IA32_A_PMC0               &&
+	         addr <  MSR_IA32_A_PMC0+pmcGp) ||
+	        (addr >= MSR_IA32_PERFCTR0             &&
+	         addr <  MSR_IA32_PERFCTR0+pmcGp)      ){
 		mask =                                        ~pmcMaskGp;
 	}else if(addr == MSR_IA32_PERF_GLOBAL_CTRL     ){
 		mask =                   ZV(pmcFf,  32) & ZV(pmcGp,   0);
@@ -357,10 +361,14 @@ uint64_t pfcGpCntRdCfg(int i            ){
 	return pfcRDMSR(MSR_IA32_PERFEVTSEL0+i);
 }
 void     pfcGpCntWrVal(int i, uint64_t v){
-	pfcWRMSR(MSR_IA32_A_PMC0+i, v);
+	if (fullWidthWrites){
+		pfcWRMSR(MSR_IA32_A_PMC0+i, v);
+	}else{
+		pfcWRMSR(MSR_IA32_PERFCTR0+i, v);
+	}
 }
 uint64_t pfcGpCntRdVal(int i            ){
-	return pfcRDMSR(MSR_IA32_A_PMC0+i);
+	return pfcRDMSR(MSR_IA32_PERFCTR0+i);
 }
 /*************** END COUNTER MANIPULATION ***************/
 
@@ -584,6 +592,9 @@ static ssize_t pfcCntWr(struct file*          f,
 static void pfcInitCPUID(void* unused){
 	uint32_t a,b,c,d;
 	(void)unused;
+
+	/* Check if CPU supports full-width writes */
+	fullWidthWrites = (pfcRDMSR(IA32_PERF_CAPABILITIES) >> 13) & 1;
 	
 	/**
 	 * Read CPUID to inform ourselves about PMCs.
@@ -610,7 +621,11 @@ static void pfcInitCPUID(void* unused){
 		pmcMaskFf = (d >>  5) & 0xFF;
 	}
 	
-	pmcMaskGp  = OV(pmcMaskGp,0);
+	if (fullWidthWrites){
+		pmcMaskGp  = OV(pmcMaskGp,0);
+	}else{
+		pmcMaskGp  = OV(32,0);
+	}
 	pmcMaskFf  = OV(pmcMaskFf,0);
 	
 	/* Dump out this data */
@@ -623,7 +638,7 @@ static void pfcInitCPUID(void* unused){
 	}
 	printk(KERN_INFO "pfc: Fixed-function  PMCs: %d\tMask %016llx\n", pmcFf, pmcMaskFf);
 	printk(KERN_INFO "pfc: General-purpose PMCs: %d\tMask %016llx\n", pmcGp, pmcMaskGp);
-	
+
 	/* Save bounds. */
 	pmcStartFf = 0;
 	pmcEndFf   = pmcFf;
@@ -652,7 +667,7 @@ static void pfcInitCounters(void* unused){
 	}
 	for(i=0;i<pmcGp;i++){
 		pfcWRMSR(MSR_IA32_PERFEVTSEL0 + i,       0);
-		pfcWRMSR(MSR_IA32_A_PMC0      + i,       0);
+		pfcWRMSR(MSR_IA32_PERFCTR0    + i,       0);
 	}
 	pfcWRMSR(MSR_IA32_PERF_GLOBAL_OVF_CTRL, ~0);
 }
