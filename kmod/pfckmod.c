@@ -791,6 +791,18 @@ MODULE_DESCRIPTION("Grants ***EXTREMELY UNSAFE*** access to the Intel Performanc
  *     NB: Number of FF counters determined by    CPUID.0x0A.EDX[ 4: 0]
  *     NB: ???? FF counter bitwidth determined by CPUID.0x0A.EDX[12: 5]
  */
+ /** 345   IA32_PERF_CAPABILITIES     -  Performance Capabilities Enumeration
+ * 
+ *                     /63/60 /56     /48     /40     /32     /24     /16     /08     /00
+ *                    {..................................................##############}
+ *                                                                       |||  ||||    |
+ *     Full-Width Write -------------------------------------------------^||  ||||    |
+ *     SMM Freeze --------------------------------------------------------^|  ||||    |
+ *     PEBS Record Format -------------------------------------------------^^^^|||    |
+ *     PEBS Arch Regs ---------------------------------------------------------^||    |
+ *     PEBS Trap ---------------------------------------------------------------^|    |
+ *     LBR Format ---------------------------------------------------------------^^^^^^
+ */
 /** 38D   IA32_FIXED_CTR_CTRL        -  Fixed Counter Controls,      ArchPerfMon v3
  * 
  *                     /63/60 /56     /48     /40     /32     /24     /16     /08     /00
