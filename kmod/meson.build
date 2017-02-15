@@ -7,6 +7,7 @@ kmod = custom_target('kmod',
   output      : ['pfc.ko'],
   input       : kmodSrcs,
   command     : [meson.source_root()+'/kmod/mesonbuildkmod.sh', meson.source_root(), meson.build_root()],
-  install     : false
+  install     : true,
+  install_dir : 'bin',
+  build_always: true
 )
-install_data([meson.build_root()+'/kmod/pfc.ko'], install_dir: 'bin')

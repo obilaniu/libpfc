@@ -17,12 +17,12 @@
 #define MAXPMC                             25
 #define MSR_IA32_PERFEVTSEL0               0x186
 #define MSR_IA32_FIXED_CTR0                0x309
+#define IA32_PERF_CAPABILITIES             0x345
 #define MSR_IA32_FIXED_CTR_CTRL            0x38D
 #define MSR_IA32_PERF_GLOBAL_STATUS        0x38E
 #define MSR_IA32_PERF_GLOBAL_CTRL          0x38F
 #define MSR_IA32_PERF_GLOBAL_OVF_CTRL      0x390
 #define MSR_IA32_A_PMC0                    0x4C1
-#define IA32_PERF_CAPABILITIES             0x345
 
 
 /* Forward Declarations */
@@ -208,7 +208,7 @@ static void pfcWRMSR(uint64_t addr, uint64_t newVal){
 	 */
 	
 	if(     (addr >= MSR_IA32_A_PMC0               &&
-	         addr <  MSR_IA32_A_PMC0+pmcGp) ||
+	         addr <  MSR_IA32_A_PMC0+pmcGp)        ||
 	        (addr >= MSR_IA32_PERFCTR0             &&
 	         addr <  MSR_IA32_PERFCTR0+pmcGp)      ){
 		mask =                                        ~pmcMaskGp;
@@ -589,10 +589,17 @@ static ssize_t pfcCntWr(struct file*          f,
  * as quite a few other things.
  */
 
-static void pfcInitCPUID(void* unused){
+static int  pfcInitCPUID(void* unused){
 	uint32_t a,b,c,d;
 	(void)unused;
-
+	
+	/* Check that CPU has performance monitoring. */
+	cpuid_count(0x00000001,0x00000000, &a,&b,&c,&d);
+	if(((c>>15) & 1) == 0){
+		printk(KERN_ERR "ERROR: Processor does not have Perfmon and Debug Capability!\n");
+		return 1;
+	}
+	
 	/* Check if CPU supports full-width writes */
 	fullWidthWrites = (pfcRDMSR(IA32_PERF_CAPABILITIES) >> 13) & 1;
 	
@@ -644,6 +651,8 @@ static void pfcInitCPUID(void* unused){
 	pmcEndFf   = pmcFf;
 	pmcStartGp = pmcFf;
 	pmcEndGp   = pmcFf+pmcGp;
+	
+	return 0;
 }
 
 /**
@@ -701,7 +710,9 @@ static int __init pfcInit(void){
 	
 	printk(KERN_INFO "pfc: Module loading...\n");
 	
-	pfcInitCPUID(NULL);
+	if(pfcInitCPUID(NULL) != 0){
+		return 1;
+	}
 	if(pmcArchVer != 3){
 		printk(KERN_INFO "pfc: ERROR: Performance monitoring architecture version %d, not 3!\n", pmcArchVer);
 		printk(KERN_INFO "pfc: ERROR: Failed to load module pfc.\n");
