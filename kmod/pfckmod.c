@@ -597,7 +597,7 @@ static int  pfcInitCPUID(void* unused){
 	cpuid_count(0x00000001,0x00000000, &a,&b,&c,&d);
 	if(((c>>15) & 1) == 0){
 		printk(KERN_ERR "ERROR: Processor does not have Perfmon and Debug Capability!\n");
-		return 1;
+		return -1;
 	}
 	
 	/* Check if CPU supports full-width writes */
@@ -711,12 +711,12 @@ static int __init pfcInit(void){
 	printk(KERN_INFO "pfc: Module loading...\n");
 	
 	if(pfcInitCPUID(NULL) != 0){
-		return 1;
+		return -1;
 	}
 	if(pmcArchVer != 3){
 		printk(KERN_INFO "pfc: ERROR: Performance monitoring architecture version %d, not 3!\n", pmcArchVer);
 		printk(KERN_INFO "pfc: ERROR: Failed to load module pfc.\n");
-		return 1;
+		return -1;
 	}
 	
 	on_each_cpu(pfcInitCounters, NULL, 1);
@@ -735,7 +735,7 @@ static int __init pfcInit(void){
 		printk(KERN_INFO "pfc: ERROR: Failed to create sysfs attributes.\n");
 		printk(KERN_INFO "pfc: ERROR: Failed to load module pfc.\n");
 		pfcExit();
-		return ret;
+		return -1;
 	}else{
 		printk(KERN_INFO "pfc: Module pfc loaded successfully. Make sure to execute\n");
 		printk(KERN_INFO "pfc:     modprobe -ar iTCO_wdt iTCO_vendor_support\n");
