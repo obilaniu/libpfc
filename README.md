@@ -8,7 +8,7 @@ _A small library and kernel module for easy access to x86 performance monitor co
 
 ## Getting the code, building and installing
 
-`libpfc`'s source code can be found on [Github](https://github.com/obilaniu/libpfc). It uses the [Meson 0.34.0](http://mesonbuild.com/) build system, which itself requires [Ninja](https://ninja-build.org/), but itself has no dependencies. It can be build as follows.
+`libpfc`'s source code can be found on [Github](https://github.com/obilaniu/libpfc). It uses the [Meson 0.41.0](http://mesonbuild.com/) build system, which itself requires [Ninja](https://ninja-build.org/), but itself has no dependencies. It can be build as follows.
 
 ```shell
     cd       /path/to/some/folder
