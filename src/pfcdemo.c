@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 
 /* Typedefs */
@@ -64,6 +65,32 @@ static const int         NUMCOUNTS;
 int main(int argc, char* argv[]){
 	int i;
 	
+	int verbose = 0, dump = 0, option;
+
+	/**
+	 * Process command line arguments
+	 */
+	while ((option = getopt(argc, argv, "dv")) != -1) {
+		switch (option) {
+		case 'v':
+			verbose = 1;
+			break;
+		case 'd':
+			dump = 1;
+			break;
+		default:
+			fprintf(stderr, "Usage: pfcdemo [-d] [-v]\n"
+					"\t-d\n\t\tDump the list of available events and quit\n"
+					"\t-v\n\t\tVerbose output\n");
+			exit(1);
+		}
+	}
+
+	if(dump){
+			pfcDumpEvts();
+			exit(1);
+	}
+
 	/**
 	 * Initialize library.
 	 */
@@ -73,12 +100,10 @@ int main(int argc, char* argv[]){
 		printf("Could not open /sys/module/pfc/* handles; Is module loaded?\n");
 		exit(1);
 	}
-	if(argc > 1){
-		pfcDumpEvts();
-		exit(1);
-	}
 	
 	
+
+
 	/**
 	 * Warm up.
 	 */
