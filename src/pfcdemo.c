@@ -86,6 +86,8 @@ int main(int argc, char* argv[]){
 		}
 	}
 
+	(void)verbose;
+
 	if(dump){
 			pfcDumpEvts();
 			exit(1);

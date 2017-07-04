@@ -1,1 +1,6 @@
 build
+kmod.build
+*.o
+*.so
+*.ko
+pfcdemo
