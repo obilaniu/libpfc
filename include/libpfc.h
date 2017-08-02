@@ -63,56 +63,40 @@ void      pfcDumpEvts      (void);
  *****  MACROS   *****
  *********************/
 
-/**
- * The PFCSTART macro takes a single pointer to a 7-element array of 64-bit
- * integers and *subtracts* out of them the start counter values.
- */
+#define _pfc_asm_code_cnt_read_(op, rcx, off)   \
+"\n\tmov      rcx, "#rcx"                    "  \
+"\n\trdpmc                                   "  \
+"\n\tshl      rdx, 32                        "  \
+"\n\tor       rdx, rax                       "  \
+"\n\t"#op"    qword ptr [%0 +   "#off"], rdx "
 
-#define PFCSTART(b)                             \
+#define _pfc_asm_code_(op)                      \
+"\n\tlfence                                  "  \
+_pfc_asm_code_cnt_read_(op, 0x40000000,  0)     \
+_pfc_asm_code_cnt_read_(op, 0x40000001,  8)     \
+_pfc_asm_code_cnt_read_(op, 0x40000002, 16)     \
+_pfc_asm_code_cnt_read_(op, 0x00000000, 24)     \
+_pfc_asm_code_cnt_read_(op, 0x00000001, 32)     \
+_pfc_asm_code_cnt_read_(op, 0x00000002, 40)     \
+_pfc_asm_code_cnt_read_(op, 0x00000003, 48)     \
+"\n\tlfence                                  "  \
+
+#define _pfc_macro_(b, op)                      \
 asm volatile(                                   \
 "\n\t.intel_syntax noprefix                  "  \
-"\n\tlfence                                  "  \
-"\n\tmov      rcx, 0x40000000                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tsub      qword ptr [%0 +   0], rdx      "  \
-"\n\tmov      rcx, 0x40000001                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tsub      qword ptr [%0 +   8], rdx      "  \
-"\n\tmov      rcx, 0x40000002                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tsub      qword ptr [%0 +  16], rdx      "  \
-"\n\tmov      rcx, 0x00000000                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tsub      qword ptr [%0 +  24], rdx      "  \
-"\n\tmov      rcx, 0x00000001                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tsub      qword ptr [%0 +  32], rdx      "  \
-"\n\tmov      rcx, 0x00000002                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tsub      qword ptr [%0 +  40], rdx      "  \
-"\n\tmov      rcx, 0x00000003                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tsub      qword ptr [%0 +  48], rdx      "  \
-"\n\tlfence                                  "  \
+_pfc_asm_code_(op)                              \
 "\n\t.att_syntax noprefix                    "  \
 :        /* Outputs */                          \
 : "r"((b)) /* Inputs */                         \
 : "memory", "rax", "rcx", "rdx"                 \
 )
+
+/**
+ * The PFCSTART macro takes a single pointer to a 7-element array of 64-bit
+ * integers and *subtracts* out of them the start counter values.
+ */
+
+#define PFCSTART(b) _pfc_macro_((b), sub)
 
 /**
  * The PFCEND macro is *exactly* the same as the PFCSTART macro, down to the
@@ -129,51 +113,7 @@ asm volatile(                                   \
  * pfcRemoveBias(b, 1) with no intervening change to the counters.
  */
 
-#define PFCEND(b)                               \
-asm volatile(                                   \
-"\n\t.intel_syntax noprefix                  "  \
-"\n\tlfence                                  "  \
-"\n\tmov      rcx, 0x40000000                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tadd      qword ptr [%0 +   0], rdx      "  \
-"\n\tmov      rcx, 0x40000001                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tadd      qword ptr [%0 +   8], rdx      "  \
-"\n\tmov      rcx, 0x40000002                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tadd      qword ptr [%0 +  16], rdx      "  \
-"\n\tmov      rcx, 0x00000000                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tadd      qword ptr [%0 +  24], rdx      "  \
-"\n\tmov      rcx, 0x00000001                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tadd      qword ptr [%0 +  32], rdx      "  \
-"\n\tmov      rcx, 0x00000002                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tadd      qword ptr [%0 +  40], rdx      "  \
-"\n\tmov      rcx, 0x00000003                "  \
-"\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\tadd      qword ptr [%0 +  48], rdx      "  \
-"\n\tlfence                                  "  \
-"\n\t.att_syntax noprefix                    "  \
-:        /* Outputs */                          \
-: "r"((b)) /* Inputs */                         \
-: "memory", "rax", "rcx", "rdx"                 \
-)
+#define PFCEND(b)   _pfc_macro_((b), add)
 
 /**
  * Remove mul times from b the counter bias due to PFCSTART/PFCEND.

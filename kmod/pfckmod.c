@@ -38,6 +38,12 @@ static ssize_t pfcCfgWr(struct file*          f,
                         char*                 buf,
                         loff_t                off,
                         size_t                len);
+static ssize_t pfcMskRd(struct file*          f,
+                        struct kobject*       kobj,
+                        struct bin_attribute* binattr,
+                        char*                 buf,
+                        loff_t                off,
+                        size_t                len);
 static ssize_t pfcCntRd(struct file*          f,
                         struct kobject*       kobj,
                         struct bin_attribute* binattr,
@@ -83,6 +89,11 @@ static const struct bin_attribute   PFC_ATTR_config     = {
 	.read    = pfcCfgRd,
 	.write   = pfcCfgWr
 };
+static const struct bin_attribute   PFC_ATTR_masks      = {
+	.attr    = {.name="masks",  .mode=0440},
+	.size    = MAXPMC*sizeof(uint64_t),
+	.read    = pfcMskRd,
+};
 static const struct bin_attribute   PFC_ATTR_counts     = {
 	.attr    = {.name="counts", .mode=0660},
 	.size    = MAXPMC*sizeof(uint64_t),
@@ -91,6 +102,7 @@ static const struct bin_attribute   PFC_ATTR_counts     = {
 };
 static const struct bin_attribute*  PFC_ATTR_GRP_LIST[] = {
 	&PFC_ATTR_config,
+	&PFC_ATTR_masks,
 	&PFC_ATTR_counts,
 	NULL
 };
@@ -483,6 +495,55 @@ static ssize_t pfcCfgWr(struct file*          f,
 }
 
 /**
+ * Read masks.
+ * 
+ * Returns the mask of the selected counters, one 64-bit word per
+ * counter, with the Ff counters first and the Gp counters last.
+ * 
+ * For Ff counters, pmcMaskFf is read.
+ * For Gp counters, pmcMaskGp is read.
+ * 
+ * @return Bytes of mask data read
+ */
+
+static ssize_t pfcMskRd (struct file*          f,
+                         struct kobject*       kobj,
+                         struct bin_attribute* binattr,
+                         char*                 buf,
+                         loff_t                off,
+                         size_t                len){
+	int pmcStart, pmcEnd, i, j;
+	uint64_t* buf64 = (uint64_t*)buf;
+	
+	/* Check access is reasonable. */
+	if(!pfcIsAligned(off, len, 0x7) || off<0 || len<0){
+		return -1;
+	}
+	
+	/* Read relevant MSRs */
+	j=0;
+	if(pfcClampRange(off>>3, len>>3, pmcStartFf, pmcEndFf, &pmcStart, &pmcEnd)){
+		pmcStart -= pmcStartFf;
+		pmcEnd   -= pmcStartFf;
+		
+		for(i=pmcStart;i<pmcEnd;i++,j++){
+			buf64[j] = pmcMaskFf;
+		}
+	}
+	if(pfcClampRange(off>>3, len>>3, pmcStartGp, pmcEndGp, &pmcStart, &pmcEnd)){
+		pmcStart -= pmcStartGp;
+		pmcEnd   -= pmcStartGp;
+		
+		for(i=pmcStart;i<pmcEnd;i++,j++){
+			buf64[j] = pmcMaskGp;
+		}
+	}
+	
+	/* Report read data */
+	return j*sizeof(uint64_t);
+}
+
+/**
  * Reads counts.
  * 
  * Returns the counts of the selected counters, one 64-bit word per counter,
@@ -682,24 +743,6 @@ static void pfcInitCounters(void* unused){
 }
 
 /**
- * Enable use of RDPMC instruction.
- */
-
-static void pfcInitRDPMC(void* unused){
-	native_write_cr4(native_read_cr4() |  0x00000100L);
-	(void)unused;
-}
-
-/**
- * Disable use of RDPMC instruction.
- */
-
-static void pfcFiniRDPMC(void* unused){
-	native_write_cr4(native_read_cr4() & ~0x00000100L);
-	(void)unused;
-}
-
-/**
  * Load module.
  * 
  * @return 0 if module load successful, non-0 otherwise.
@@ -709,6 +752,14 @@ static int __init pfcInit(void){
 	int ret;
 	
 	printk(KERN_INFO "pfc: Module loading...\n");
+	if(!(native_read_cr4() & 0x00000100L)){
+		printk(KERN_INFO "pfc: ERROR: User-space RDPMC not enabled!\n");
+		printk(KERN_INFO "pfc: ERROR: Make sure to execute\n");
+		printk(KERN_INFO "pfc: ERROR:     echo 2 > /sys/bus/event_source/devices/cpu/rdpmc\n");
+		printk(KERN_INFO "pfc: ERROR: as root. This enables ultra-low-overhead, userspace\n");
+		printk(KERN_INFO "pfc: ERROR: access to the performance counters.\n");
+		return -1;
+	}
 	
 	if(pfcInitCPUID(NULL) != 0){
 		return -1;
@@ -720,13 +771,14 @@ static int __init pfcInit(void){
 	}
 	
 	on_each_cpu(pfcInitCounters, NULL, 1);
-	on_each_cpu(pfcInitRDPMC,    NULL, 1);
 	ret  = sysfs_create_group((struct kobject*)&THIS_MODULE->mkobj,
 	                          &PFC_ATTR_GRP);
 #define NONSECURE 1
 #if NONSECURE
 	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
 	                          (struct attribute*)&PFC_ATTR_config, 0666);
+	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
+	                          (struct attribute*)&PFC_ATTR_masks,  0444);
 	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
 	                          (struct attribute*)&PFC_ATTR_counts, 0666);
 #endif
@@ -740,7 +792,6 @@ static int __init pfcInit(void){
 		printk(KERN_INFO "pfc: Module pfc loaded successfully. Make sure to execute\n");
 		printk(KERN_INFO "pfc:     modprobe -ar iTCO_wdt iTCO_vendor_support\n");
 		printk(KERN_INFO "pfc:     echo 0 > /proc/sys/kernel/nmi_watchdog\n");
-		printk(KERN_INFO "pfc:     echo 2 > /sys/bus/event_source/devices/cpu/rdpmc\n");
 		printk(KERN_INFO "pfc: and blacklist iTCO_vendor_support and iTCO_wdt, since the CR4.PCE register\n");
 		printk(KERN_INFO "pfc: initialization is periodically undone by an unknown agent.\n");
 		return 0;
@@ -755,7 +806,6 @@ static void        pfcExit(void){
 	printk(KERN_INFO "pfc: Module exiting...\n");
 	
 	on_each_cpu(pfcInitCounters, NULL, 1);
-	on_each_cpu(pfcFiniRDPMC,    NULL, 1);
 	sysfs_remove_group((struct kobject*)&THIS_MODULE->mkobj,
 	                   &PFC_ATTR_GRP);
 	

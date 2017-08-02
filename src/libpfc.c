@@ -29,8 +29,10 @@ struct EVENT{
 
 
 /* Global data */
-static int cfgFd = -1;
-static int cntFd = -1;
+static int      cfgFd    = -1;
+static int      mskFd    = -1;
+static int      cntFd    = -1;
+static uint64_t masks[7] = {0,0,0,0,0,0,0};
 
 static const struct UMASK UMASK_LIST[]    = {
     {0x02, "store_forward"},        /*   0 */ /* 0x03 */
@@ -389,15 +391,20 @@ int       pfcInit          (void){
 	 * Open the magic files perfcount gives us access to
 	 */
 	
-	cfgFd = open("/sys/module/pfc/config", O_RDWR | O_CLOEXEC);
-	cntFd = open("/sys/module/pfc/counts", O_RDWR | O_CLOEXEC);
+	cfgFd = open("/sys/module/pfc/config", O_RDWR   | O_CLOEXEC);
+	mskFd = open("/sys/module/pfc/masks",  O_RDONLY | O_CLOEXEC);
+	cntFd = open("/sys/module/pfc/counts", O_RDWR   | O_CLOEXEC);
 	
 	/**
 	 * If failure, abort
 	 */
 	
-	if(cfgFd<0 || cntFd<0){
+	if(cfgFd<0 || mskFd<0 || cntFd<0){
 		pfcFini();
+		return 1;
+	}
+	
+	if(pread(mskFd, masks, sizeof(masks), 0) != sizeof(masks)){
 		return 1;
 	}else{
 		return 0;
@@ -406,6 +413,8 @@ int       pfcInit          (void){
 void      pfcFini          (void){
 	close(cfgFd);
 	cfgFd = -1;
+	close(mskFd);
+	mskFd = -1;
 	close(cntFd);
 	cntFd = -1;
 }
@@ -586,80 +595,8 @@ void      pfcRemoveBias     (PFC_CNT* b, int64_t mul){
 		memset(warmup, 0, sizeof(warmup));
 		asm volatile(
 		"\n\t.intel_syntax noprefix                  "
-		"\n\tlfence                                  "
-		"\n\tmov      rcx, 0x40000000                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tadd      qword ptr [%0 +   0], rdx      "
-		"\n\tmov      rcx, 0x40000001                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tadd      qword ptr [%0 +   8], rdx      "
-		"\n\tmov      rcx, 0x40000002                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tadd      qword ptr [%0 +  16], rdx      "
-		"\n\tmov      rcx, 0x00000000                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tadd      qword ptr [%0 +  24], rdx      "
-		"\n\tmov      rcx, 0x00000001                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tadd      qword ptr [%0 +  32], rdx      "
-		"\n\tmov      rcx, 0x00000002                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tadd      qword ptr [%0 +  40], rdx      "
-		"\n\tmov      rcx, 0x00000003                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tadd      qword ptr [%0 +  48], rdx      "
-		"\n\tlfence                                  "
-		"\n\tlfence                                  "
-		"\n\tmov      rcx, 0x40000000                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tsub      qword ptr [%0 +   0], rdx      "
-		"\n\tmov      rcx, 0x40000001                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tsub      qword ptr [%0 +   8], rdx      "
-		"\n\tmov      rcx, 0x40000002                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tsub      qword ptr [%0 +  16], rdx      "
-		"\n\tmov      rcx, 0x00000000                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tsub      qword ptr [%0 +  24], rdx      "
-		"\n\tmov      rcx, 0x00000001                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tsub      qword ptr [%0 +  32], rdx      "
-		"\n\tmov      rcx, 0x00000002                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tsub      qword ptr [%0 +  40], rdx      "
-		"\n\tmov      rcx, 0x00000003                "
-		"\n\trdpmc                                   "
-		"\n\tshl      rdx, 32                        "
-		"\n\tor       rdx, rax                       "
-		"\n\tsub      qword ptr [%0 +  48], rdx      "
-		"\n\tlfence                                  "
+		_pfc_asm_code_(add)
+		_pfc_asm_code_(sub)
 		"\n\t.att_syntax noprefix                    "
 		:               /* Outputs */
 		: "r"((warmup)) /* Inputs */
@@ -669,6 +606,7 @@ void      pfcRemoveBias     (PFC_CNT* b, int64_t mul){
 	
 	for(i=0;i<7;i++){
 		b[i] += warmup[i]*mul;
+		b[i] &= masks[i];
 	}
 }
 
