@@ -24,6 +24,8 @@
 #define MSR_IA32_PERF_GLOBAL_OVF_CTRL      0x390
 #define MSR_IA32_A_PMC0                    0x4C1
 
+#define PRINTV(...) if (verbose) { printk(KERN_INFO __VA_ARGS__); }
+
 
 /* Forward Declarations */
 static ssize_t pfcCfgRd(struct file*          f,
@@ -56,6 +58,16 @@ static ssize_t pfcCntWr(struct file*          f,
                         char*                 buf,
                         loff_t                off,
                         size_t                len);
+static ssize_t pfcVerboseRd(struct kobject* kobj,
+						struct kobj_attribute* attr,
+						char* buf);
+static ssize_t pfcVerboseWr(struct kobject* kobj,
+						struct kobj_attribute* attr,
+						const char* buf,
+						size_t count);
+static ssize_t pfcCR4PceRd(struct kobject* kobj,
+                        struct kobj_attribute* attr,
+                        char* buf);
 static int  __init pfcInit(void);
 static void        pfcExit(void);
 
@@ -72,6 +84,7 @@ static int       pmcEndGp             = 0;
 static uint64_t  pmcMaskFf            = 0;
 static uint64_t  pmcMaskGp            = 0;
 static int       fullWidthWrites      = 0;
+static int       verbose              = 0;
 
 /**
  * The counters consist in the following MSRs on Core i7:
@@ -83,6 +96,7 @@ static int       fullWidthWrites      = 0;
 
 
 /* Attribute Hierarchy */
+/* Binary attributes */
 static const struct bin_attribute   PFC_ATTR_config     = {
 	.attr    = {.name="config", .mode=0660},
 	.size    = MAXPMC*sizeof(uint64_t),
@@ -100,16 +114,40 @@ static const struct bin_attribute   PFC_ATTR_counts     = {
 	.read    = pfcCntRd,
 	.write   = pfcCntWr
 };
-static const struct bin_attribute*  PFC_ATTR_GRP_LIST[] = {
+static const struct bin_attribute*  PFC_BIN_ATTR_GRP_LIST[] = {
 	&PFC_ATTR_config,
 	&PFC_ATTR_masks,
 	&PFC_ATTR_counts,
 	NULL
 };
+
+/* string attributes */
+static struct kobj_attribute PFC_ATTR_verbose = {
+		.attr  = {.name="verbose", .mode=0660},
+		.show  = pfcVerboseRd,
+		.store = pfcVerboseWr
+
+};
+
+static struct kobj_attribute PFC_ATTR_cr4pce = {
+        .attr  = {.name="cr4.pce", .mode=0440},
+        .show  = pfcCR4PceRd
+
+};
+
+static struct attribute*  PFC_STR_ATTR_GRP_LIST[] = {
+		&PFC_ATTR_verbose.attr,
+		&PFC_ATTR_cr4pce.attr,
+		NULL
+};
+
+/* the attribute group, which points to all binary and string attributes */
 static const struct attribute_group PFC_ATTR_GRP        = {
 	.name       = NULL,
-	.bin_attrs  = (struct bin_attribute	**)PFC_ATTR_GRP_LIST
+	.attrs      = PFC_STR_ATTR_GRP_LIST,
+	.bin_attrs  = (struct bin_attribute	**)PFC_BIN_ATTR_GRP_LIST
 };
+
 
 
 
@@ -639,6 +677,37 @@ static ssize_t pfcCntWr(struct file*          f,
 	return j*sizeof(uint64_t);
 }
 
+static ssize_t pfcVerboseRd(struct kobject* kobj,
+						struct kobj_attribute* attr,
+						char* buf) {
+	strcpy(buf, verbose ? "1" : "0");
+	return 1;
+}
+
+static ssize_t pfcCR4PceRd(struct kobject* kobj,
+                        struct kobj_attribute* attr,
+                        char* buf) {
+    strcpy(buf, (native_read_cr4() & 0x00000100L) ? "1" : "0");
+    return 1;
+}
+
+static ssize_t pfcVerboseWr(struct kobject* kobj,
+						struct kobj_attribute* attr,
+						const char* buf,
+						size_t count) {
+	if (count == 1 || (count == 2 && buf[1] == '\n')) {
+		char value = *buf;
+		if (value == '0' || value == '1') {
+			verbose = (value == '1');
+			printk(KERN_INFO "pfc: verbose mode %s\n", verbose ? "enabled" : "disabled");
+			return count;
+		}
+	}
+
+	printk(KERN_NOTICE "pfc: bad value written to verbose, expected 0 or 1 but got '%s' (sz=%zu)\n", buf, count);
+	return -1;
+}
+
 
 
 
@@ -764,8 +833,9 @@ static int __init pfcInit(void){
 	if(pfcInitCPUID(NULL) != 0){
 		return -1;
 	}
-	if(pmcArchVer != 3){
-		printk(KERN_INFO "pfc: ERROR: Performance monitoring architecture version %d, not 3!\n", pmcArchVer);
+
+	if(pmcArchVer < 3 || pmcArchVer > 4){
+		printk(KERN_INFO "pfc: ERROR: Unsupported performance monitoring architecture version %d, only 3 or 4 supported!\n", pmcArchVer);
 		printk(KERN_INFO "pfc: ERROR: Failed to load module pfc.\n");
 		return -1;
 	}
@@ -781,6 +851,10 @@ static int __init pfcInit(void){
 	                          (struct attribute*)&PFC_ATTR_masks,  0444);
 	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
 	                          (struct attribute*)&PFC_ATTR_counts, 0666);
+	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
+		                      (struct attribute*)&PFC_ATTR_verbose, 0666);
+	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
+	                              (struct attribute*)&PFC_ATTR_cr4pce, 0444);
 #endif
 	
 	if(ret != 0){
