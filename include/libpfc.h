@@ -12,6 +12,13 @@
 typedef uint64_t  PFC_CFG;
 typedef int64_t   PFC_CNT;
 
+// the next three definitions are the positions of the three fixed counters within
+// the PFC_CNT array
+// See also "Table 18-2. Association of Fixed-Function Performance Counters with Architectural Performance Events"
+// in the Intel SDM Vol 3.
+#define PFC_FIXEDCNT_INSTRUCTIONS_RETIRED 0      /* INST_RETIRED.ANY */
+#define PFC_FIXEDCNT_CPU_CLK_UNHALTED     1      /* CPU_CLK_UNHALTED.THREAD */
+#define PFC_FIXEDCNT_CPU_CLK_REF_TSC      2      /* CPU_CLK_UNHALTED.REF_TSC */
 
 
 /* Extern "C" Guard */
@@ -31,16 +38,16 @@ int       pfcInit          (void);
 void      pfcFini          (void);
 
 /**
- * Pins calling thread to given core
+ * Pins calling thread to given core, returns zero on success, non-zero otherwise.
  */
-
-void      pfcPinThread     (int core);
+int      pfcPinThread     (int core);
 
 /**
  * Read and write the configurations and values of the n counters starting at
  * counter k.
  */
 
+/* Writes n configuration values from cfg, starting at counter k. Returns 0 on success or an error code otherwise. */
 int       pfcWrCfgs        (int k, int n, const PFC_CFG* cfg);
 int       pfcRdCfgs        (int k, int n,       PFC_CFG* cfg);
 int       pfcWrCnts        (int k, int n, const PFC_CNT* cnt);
@@ -121,6 +128,10 @@ _pfc_asm_code_(op)                              \
 
 void      pfcRemoveBias     (PFC_CNT* b, int64_t mul);
 
+/**
+ * Return a string representation of an error code such as those returned by pfcInit
+ */
+const char *pfcErrorString(int err);
 
 
 /* End Extern "C" Guard */

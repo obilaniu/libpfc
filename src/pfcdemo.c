@@ -141,7 +141,7 @@ int main(int argc, char* argv[]){
 		 * We benchmark the warmed-up code.
 		 * 
 		 * The PFCSTART()/PFCEND() macro pair must sandwich the code to be
-		 * tested as acuurately as possible, although frequently one or more
+		 * tested as accurately as possible, although frequently one or more
 		 * intruder instructions appear. Their argument is the buffer of (7)
 		 * PFC_CNT counters.
 		 * 

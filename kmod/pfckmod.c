@@ -65,6 +65,9 @@ static ssize_t pfcVerboseWr(struct kobject* kobj,
 						struct kobj_attribute* attr,
 						const char* buf,
 						size_t count);
+static ssize_t pfcCR4PceRd(struct kobject* kobj,
+                        struct kobj_attribute* attr,
+                        char* buf);
 static int  __init pfcInit(void);
 static void        pfcExit(void);
 
@@ -125,8 +128,16 @@ static struct kobj_attribute PFC_ATTR_verbose = {
 		.store = pfcVerboseWr
 
 };
+
+static struct kobj_attribute PFC_ATTR_cr4pce = {
+        .attr  = {.name="cr4.pce", .mode=0440},
+        .show  = pfcCR4PceRd
+
+};
+
 static struct attribute*  PFC_STR_ATTR_GRP_LIST[] = {
 		&PFC_ATTR_verbose.attr,
+		&PFC_ATTR_cr4pce.attr,
 		NULL
 };
 
@@ -673,6 +684,13 @@ static ssize_t pfcVerboseRd(struct kobject* kobj,
 	return 1;
 }
 
+static ssize_t pfcCR4PceRd(struct kobject* kobj,
+                        struct kobj_attribute* attr,
+                        char* buf) {
+    strcpy(buf, (native_read_cr4() & 0x00000100L) ? "1" : "0");
+    return 1;
+}
+
 static ssize_t pfcVerboseWr(struct kobject* kobj,
 						struct kobj_attribute* attr,
 						const char* buf,
@@ -835,6 +853,8 @@ static int __init pfcInit(void){
 	                          (struct attribute*)&PFC_ATTR_counts, 0666);
 	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
 		                      (struct attribute*)&PFC_ATTR_verbose, 0666);
+	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
+	                              (struct attribute*)&PFC_ATTR_cr4pce, 0444);
 #endif
 	
 	if(ret != 0){

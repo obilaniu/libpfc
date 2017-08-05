@@ -25,6 +25,7 @@ pfc.ko: kmod/pfckmod.c kmod/Makefile
 	cp -r kmod kmod.build
 	cd kmod.build && $(MAKE) MAKEFLAGS=
 	mv kmod.build/pfc.ko .
+	rm -rf kmod.build
 
 clean :
 	rm -f *.o libpfc.so pfcdemo pfc.ko

@@ -382,7 +382,28 @@ static const struct EVENT EVENT_LIST[256] = {
     {0x00, NULL             , NULL}
 };
 
+/* Error Codes */
+#define PFC_ERR_OPENING_SYSFILE (-10)
+#define PFC_ERR_PWRITE_FAILED   (-11) // a pwrite() call returned error (check errno?)
+#define PFC_ERR_PWRITE_TOO_FEW  (-12) // a pwrite() call wrote less than the expected number of bytes
+#define PFC_ERR_CPU_PIN_FAILED  (-13) // cpu pinning failed, probably in sched_setaffinity
+#define PFC_ERR_CR4_PCE_NOT_SET (-14) // drive reported that cr4.pce wasn't set, or there was somehow an issue reading it
+#define PFC_ERR_AFFINITY_FAILED (-15) // setting CPU affinity failed (perhaps affinity is set externally excluding CPU 0?)
+#define PFC_ERR_READING_MASKS   (-16) // didn't read the expected number of mask bytes from the sysfs
 
+typedef struct {
+    int errorCode;
+    const char *message;
+} ErrorInfo;
+
+ErrorInfo AllErrors[] = {
+        { PFC_ERR_OPENING_SYSFILE, "Error opening the /sys/module/pfc files. Is the kernel module loaded?" },
+        { PFC_ERR_PWRITE_FAILED,   "Error writing to the driver configuration files (pwrite failed)." },
+        { PFC_ERR_PWRITE_TOO_FEW,  "Write to driver config files wrote fewer bytes than expected." },
+        { PFC_ERR_CPU_PIN_FAILED,  "Pinning benchmark to single CPU failed." },
+        { PFC_ERR_CR4_PCE_NOT_SET, "CR4.PCE not set. Try echo echo 2 > /sys/bus/event_source/devices/cpu/rdpmc." },
+        { 0, "Success" }
+};
 
 /* Function Definitions */
 
@@ -395,21 +416,33 @@ int       pfcInit          (void){
 	mskFd = open("/sys/module/pfc/masks",  O_RDONLY | O_CLOEXEC);
 	cntFd = open("/sys/module/pfc/counts", O_RDWR   | O_CLOEXEC);
 	
+	// Check the CR4.PCE bit exposed by the kernel driver to check that we can issue rdpmc
+	// calls from user space. If we fail to open the file, just keep going (e.g., old kernel
+	// driver with new userspace, or secure permissions).
+	int cr4pce = open("/sys/module/pfc/cr4.pce", O_RDONLY);
+	if (cr4pce != -1) {
+	    unsigned char buf[1];
+	    int n = read(cr4pce, buf, 1);
+	    if (n != 1 || buf[0] != '1') {
+	        return PFC_ERR_CR4_PCE_NOT_SET;
+	    }
+	}
+
 	/**
 	 * If failure, abort
 	 */
-	
 	if(cfgFd<0 || mskFd<0 || cntFd<0){
 		pfcFini();
-		return 1;
+		return PFC_ERR_OPENING_SYSFILE;
 	}
 	
 	if(pread(mskFd, masks, sizeof(masks), 0) != sizeof(masks)){
 		return 1;
-	}else{
+	} else {
 		return 0;
 	}
 }
+
 void      pfcFini          (void){
 	close(cfgFd);
 	cfgFd = -1;
@@ -419,15 +452,25 @@ void      pfcFini          (void){
 	cntFd = -1;
 }
 
-void      pfcPinThread     (int core){
+int      pfcPinThread     (int core){
 	cpu_set_t cpuset;
 	CPU_ZERO(&cpuset);
 	CPU_SET(core, &cpuset);
-	sched_setaffinity(0, sizeof(cpuset), &cpuset);
+	if (sched_setaffinity(0, sizeof(cpuset), &cpuset) == -1) {
+	    return PFC_ERR_AFFINITY_FAILED;
+	}
+	return 0;
 }
 
 int       pfcWrCfgs        (int k, int n, const PFC_CFG* cfg){
-	return pwrite(cfgFd, cfg, sizeof(*cfg)*n, k*sizeof(*cfg));
+    ssize_t wrSize = sizeof(*cfg)*n;
+    ssize_t actual = pwrite(cfgFd, cfg, wrSize, k*sizeof(*cfg));
+	if (actual == -1) {
+	    return PFC_ERR_PWRITE_FAILED;
+	} else if (actual < wrSize) {
+	    return PFC_ERR_PWRITE_TOO_FEW;
+	}
+	return 0;
 }
 int       pfcRdCfgs        (int k, int n,       PFC_CFG* cfg){
 	return pread (cfgFd, cfg, sizeof(*cfg)*n, k*sizeof(*cfg));
@@ -608,5 +651,14 @@ void      pfcRemoveBias     (PFC_CNT* b, int64_t mul){
 		b[i] += warmup[i]*mul;
 		b[i] &= masks[i];
 	}
+}
+
+const char *pfcErrorString(int err) {
+    for (int i = 0; i < sizeof(AllErrors)/sizeof(AllErrors[0]); i++) {
+        if (AllErrors[i].errorCode == err) {
+            return AllErrors[i].message;
+        }
+    }
+    return "Unknown Error";
 }
 
