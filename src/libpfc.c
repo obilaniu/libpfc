@@ -654,7 +654,8 @@ void      pfcRemoveBias     (PFC_CNT* b, int64_t mul){
 }
 
 const char *pfcErrorString(int err) {
-    for (int i = 0; i < sizeof(AllErrors)/sizeof(AllErrors[0]); i++) {
+    int i;
+    for (i = 0; i < sizeof(AllErrors)/sizeof(AllErrors[0]); i++) {
         if (AllErrors[i].errorCode == err) {
             return AllErrors[i].message;
         }
