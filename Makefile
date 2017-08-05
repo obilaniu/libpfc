@@ -3,7 +3,7 @@
 vpath %.c src
 vpath %.h include
 
-CFLAGS += -Wall -Winvalid-pch -O0 -g -Iinclude
+CFLAGS += -Wall -Winvalid-pch -O0 -g -Iinclude -std=gnu99
 SHAREDLIB_FLAGS = -Wl,--no-undefined -Wl,--as-needed -shared -fPIC -Wl,-soname,libpfc.so '-Wl,-rpath,$$ORIGIN/' -Wl,-rpath-link,/home/tdowns/dev/uarch-bench/libpfc/build/src
 
 all : libpfc.so pfcdemo pfc.ko
