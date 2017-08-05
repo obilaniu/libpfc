@@ -1,4 +1,6 @@
 /* Includes */
+#define _GNU_SOURCE
+
 #include "libpfc.h"
 #include <ctype.h>
 #include <stdint.h>
@@ -7,7 +9,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#define __USE_GNU
 #include <sched.h>
 
 
@@ -382,15 +383,6 @@ static const struct EVENT EVENT_LIST[256] = {
     {0x00, NULL             , NULL}
 };
 
-/* Error Codes */
-#define PFC_ERR_OPENING_SYSFILE (-10)
-#define PFC_ERR_PWRITE_FAILED   (-11) // a pwrite() call returned error (check errno?)
-#define PFC_ERR_PWRITE_TOO_FEW  (-12) // a pwrite() call wrote less than the expected number of bytes
-#define PFC_ERR_CPU_PIN_FAILED  (-13) // cpu pinning failed, probably in sched_setaffinity
-#define PFC_ERR_CR4_PCE_NOT_SET (-14) // drive reported that cr4.pce wasn't set, or there was somehow an issue reading it
-#define PFC_ERR_AFFINITY_FAILED (-15) // setting CPU affinity failed (perhaps affinity is set externally excluding CPU 0?)
-#define PFC_ERR_READING_MASKS   (-16) // didn't read the expected number of mask bytes from the sysfs
-
 typedef struct {
     int errorCode;
     const char *message;
@@ -423,6 +415,7 @@ int       pfcInit          (void){
 	if (cr4pce != -1) {
 	    unsigned char buf[1];
 	    int n = read(cr4pce, buf, 1);
+	    close(cr4pce);
 	    if (n != 1 || buf[0] != '1') {
 	        return PFC_ERR_CR4_PCE_NOT_SET;
 	    }
@@ -437,7 +430,7 @@ int       pfcInit          (void){
 	}
 	
 	if(pread(mskFd, masks, sizeof(masks), 0) != sizeof(masks)){
-		return 1;
+		return PFC_ERR_READING_MASKS;
 	} else {
 		return 0;
 	}

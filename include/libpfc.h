@@ -20,6 +20,19 @@ typedef int64_t   PFC_CNT;
 #define PFC_FIXEDCNT_CPU_CLK_UNHALTED     1      /* CPU_CLK_UNHALTED.THREAD */
 #define PFC_FIXEDCNT_CPU_CLK_REF_TSC      2      /* CPU_CLK_UNHALTED.REF_TSC */
 
+/* Error Codes
+ *
+ * Functions that return an int error may return one of the following codes, which can be turned
+ * into a human-readable string using pfcErrorString.
+ */
+#define PFC_ERR_OPENING_SYSFILE (-10) // couldn't open the /sys/modules/pfc files, kernel module probably not loaded
+#define PFC_ERR_PWRITE_FAILED   (-11) // a pwrite() call returned error (check errno?)
+#define PFC_ERR_PWRITE_TOO_FEW  (-12) // a pwrite() call wrote less than the expected number of bytes
+#define PFC_ERR_CPU_PIN_FAILED  (-13) // cpu pinning failed, probably in sched_setaffinity
+#define PFC_ERR_CR4_PCE_NOT_SET (-14) // drive reported that cr4.pce wasn't set, or there was somehow an issue reading it
+#define PFC_ERR_AFFINITY_FAILED (-15) // setting CPU affinity failed (perhaps affinity is set externally excluding CPU 0?)
+#define PFC_ERR_READING_MASKS   (-16) // didn't read the expected number of mask bytes from the sysfs
+
 
 /* Extern "C" Guard */
 #ifdef __cplusplus

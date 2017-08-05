@@ -1,10 +1,14 @@
+# Makefile for libpfc userland and kernel components.
+# The preferred build method for libpfc is the combination of meson and ninja, and so this Makefile
+# may not always be up to date. It is provided for projects that prefer make-only builds.
+
 .PHONY : all clean
 
 vpath %.c src
 vpath %.h include
 
 CFLAGS += -Wall -Winvalid-pch -O0 -g -Iinclude -std=gnu99
-SHAREDLIB_FLAGS = -Wl,--no-undefined -Wl,--as-needed -shared -fPIC -Wl,-soname,libpfc.so '-Wl,-rpath,$$ORIGIN/' -Wl,-rpath-link,/home/tdowns/dev/uarch-bench/libpfc/build/src
+SHAREDLIB_FLAGS = -Wl,--no-undefined -Wl,--as-needed -shared -fPIC -Wl,-soname,libpfc.so '-Wl,-rpath,$$ORIGIN/'
 
 all : libpfc.so pfcdemo pfc.ko
 
@@ -20,7 +24,7 @@ pfcdemo.o : pfcdemo.c libpfc.h
 pfcdemo : pfcdemo.o libpfc.so
 	$(CC) '-Wl,-rpath,$$ORIGIN/' -L. pfcdemo.o -lpfc -lm -o pfcdemo
 
-pfc.ko: kmod/pfckmod.c kmod/Makefile
+pfc.ko : kmod/pfckmod.c kmod/Makefile
 	rm -rf kmod.build
 	cp -r kmod kmod.build
 	cd kmod.build && $(MAKE) MAKEFLAGS=
