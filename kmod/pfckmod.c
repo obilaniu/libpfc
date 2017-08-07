@@ -339,15 +339,12 @@ void     pfcFfCntWrCfg(int i, uint64_t c){
 	/**
 	 * We forbid the setting of the following bits in each 4-bit config group.
 	 *     Bit 3: PMI Interrupt on counter overflow
-	 *     Bit 2: AnyThread bit
-	 *     Bit 0: OS-mode bit
-	 * for all counters. Effectively the only bit permitted is Bit 1 (User-mode
-	 * tracking of event).
+	 * for all counters.
 	 * 
-	 * This corresponds to keeping only 0b0010.
+	 * This corresponds to keeping only 0b0111.
 	 */
 	
-	c  &= 0x2;
+	c  &= 0x7;
 	c   = CV(pfcRDMSR(MSR_IA32_FIXED_CTR_CTRL),  4, 4*i) | BV(c, 4, 4*i);
 	pfcWRMSR(MSR_IA32_FIXED_CTR_CTRL, c);
 }
@@ -374,14 +371,12 @@ void     pfcGpCntWrCfg(int i, uint64_t c){
 	
 	/**
 	 * We forbid the setting of the following bits in each PERFEVTSELx MSR:
-	 *     Bit 21: AnyThread bit
 	 *     Bit 20: APIC Interrupt Enable on overflow bit
 	 *     Bit 19: Pin Control bit
-	 *     Bit 17: OS-mode bit
 	 * for all counters.
 	 */
 	
-	c &= ~0x00000000003A0000ULL;
+	c &= ~0x0000000000180000ULL;
 	
 	/**
 	 * For odd reasons, certain cache statistics can only be collected on
