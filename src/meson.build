@@ -13,7 +13,7 @@ mDep = cc.find_library('m', required : false)
 #    executable(..., dependencies : m_dep)
 
 libpfcDeps = []
-
+libpfcIncs = [libpfcIncs, kmodIncs]
 
 libpfc = library('pfc', libpfcSrcs,
                  include_directories: libpfcIncs,

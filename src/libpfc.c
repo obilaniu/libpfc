@@ -33,9 +33,11 @@ struct EVENT{
 static int      cfgFd    = -1;
 static int      mskFd    = -1;
 static int      cntFd    = -1;
+static int      msrFd    = -1;
+static int      cr4Fd    = -1;
 static uint64_t masks[7] = {0,0,0,0,0,0,0};
 
-static const struct UMASK UMASK_LIST[]    = {
+static const struct UMASK UMASK_LIST[]         = {
     {0x02, "store_forward"},        /*   0 */ /* 0x03 */
     {0x08, "no_sr"},
     {0x00, NULL},
@@ -322,7 +324,7 @@ static const struct UMASK UMASK_LIST[]    = {
     {0x06, "demand_dirty"},
     {0x00, NULL}
 };
-static const struct EVENT EVENT_LIST[256] = {
+static const struct EVENT EVENT_LIST[256]      = {
     {0x03, &UMASK_LIST[   0], "ld_blocks"},
     {0x05, &UMASK_LIST[   3], "misalign_mem_ref"},
     {0x07, &UMASK_LIST[   6], "ld_blocks_partial"},
@@ -382,19 +384,15 @@ static const struct EVENT EVENT_LIST[256] = {
     {0xF2, &UMASK_LIST[ 282], "l2_lines_out"},
     {0x00, NULL             , NULL}
 };
-
-typedef struct {
-    int errorCode;
-    const char *message;
-} ErrorInfo;
-
-ErrorInfo AllErrors[] = {
-        { PFC_ERR_OPENING_SYSFILE, "Error opening the /sys/module/pfc files. Is the kernel module loaded?" },
-        { PFC_ERR_PWRITE_FAILED,   "Error writing to the driver configuration files (pwrite failed)." },
-        { PFC_ERR_PWRITE_TOO_FEW,  "Write to driver config files wrote fewer bytes than expected." },
-        { PFC_ERR_CPU_PIN_FAILED,  "Pinning benchmark to single CPU failed." },
-        { PFC_ERR_CR4_PCE_NOT_SET, "CR4.PCE not set. Try echo echo 2 > /sys/bus/event_source/devices/cpu/rdpmc." },
-        { 0, "Success" }
+static const char* const  PFC_ERROR_MESSAGES[] = {
+	[-PFC_ERR_OK]              = "Success",
+	[-PFC_ERR_OPENING_SYSFILE] = "Error opening the /sys/module/pfc files. Is the kernel module loaded?",
+	[-PFC_ERR_PWRITE_FAILED]   = "Error writing to the driver configuration files (pwrite failed).",
+	[-PFC_ERR_PWRITE_TOO_FEW]  = "Write to driver config files wrote fewer bytes than expected.",
+	[-PFC_ERR_CPU_PIN_FAILED]  = "Pinning benchmark to single CPU failed.",
+	[-PFC_ERR_CR4_PCE_NOT_SET] = "CR4.PCE not set. Try echo 2 > /sys/bus/event_source/devices/cpu/rdpmc.",
+	[-PFC_ERR_AFFINITY_FAILED] = "Setting CPU affinity failed (perhaps affinity is set externally excluding CPU 0?)",
+	[-PFC_ERR_READING_MASKS]   = "Didn't read the expected number of mask bytes from the sysfs",
 };
 
 /* Function Definitions */
@@ -404,36 +402,46 @@ int       pfcInit          (void){
 	 * Open the magic files perfcount gives us access to
 	 */
 	
-	cfgFd = open("/sys/module/pfc/config", O_RDWR   | O_CLOEXEC);
-	mskFd = open("/sys/module/pfc/masks",  O_RDONLY | O_CLOEXEC);
-	cntFd = open("/sys/module/pfc/counts", O_RDWR   | O_CLOEXEC);
-	
-	// Check the CR4.PCE bit exposed by the kernel driver to check that we can issue rdpmc
-	// calls from user space. If we fail to open the file, just keep going (e.g., old kernel
-	// driver with new userspace, or secure permissions).
-	int cr4pce = open("/sys/module/pfc/cr4.pce", O_RDONLY);
-	if (cr4pce != -1) {
-	    unsigned char buf[1];
-	    int n = read(cr4pce, buf, 1);
-	    close(cr4pce);
-	    if (n != 1 || buf[0] != '1') {
-	        return PFC_ERR_CR4_PCE_NOT_SET;
-	    }
-	}
+	cfgFd = open("/sys/module/pfc/config",  O_RDWR   | O_CLOEXEC);
+	mskFd = open("/sys/module/pfc/masks",   O_RDONLY | O_CLOEXEC);
+	cntFd = open("/sys/module/pfc/counts",  O_RDWR   | O_CLOEXEC);
+	msrFd = open("/sys/module/pfc/msr",     O_RDONLY | O_CLOEXEC);
+	cr4Fd = open("/sys/module/pfc/cr4.pce", O_RDONLY | O_CLOEXEC);
 
 	/**
-	 * If failure, abort
+	 * If failed to open, abort.
 	 */
-	if(cfgFd<0 || mskFd<0 || cntFd<0){
+	
+	if(cfgFd<0 || mskFd<0 || cntFd<0 || msrFd<0 || cr4Fd<0){
 		pfcFini();
 		return PFC_ERR_OPENING_SYSFILE;
 	}
 	
+	/**
+	 * Check the CR4.PCE bit exposed by the kernel driver to check that we can issue rdpmc
+	 * calls from user space. If we fail to open the file, just keep going (e.g., old kernel
+	 * driver with new userspace, or secure permissions).
+	 */
+	
+	if(cr4Fd != -1){
+		unsigned char buf[1];
+		int n = read(cr4Fd, buf, sizeof(buf));
+		close(cr4Fd);
+		cr4Fd = -1;
+		if(n != 1 || buf[0] != '1'){
+			return PFC_ERR_CR4_PCE_NOT_SET;
+		}
+	}
+	
+	/**
+	 * Read out mask information to learn bitwidths.
+	 */
+	
 	if(pread(mskFd, masks, sizeof(masks), 0) != sizeof(masks)){
 		return PFC_ERR_READING_MASKS;
-	} else {
-		return 0;
 	}
+	
+	return 0;
 }
 
 void      pfcFini          (void){
@@ -443,6 +451,10 @@ void      pfcFini          (void){
 	mskFd = -1;
 	close(cntFd);
 	cntFd = -1;
+	close(msrFd);
+	msrFd = -1;
+	close(cr4Fd);
+	cr4Fd = -1;
 }
 
 int      pfcPinThread     (int core){
@@ -474,10 +486,21 @@ int       pfcWrCnts        (int k, int n, const PFC_CNT* cnt){
 int       pfcRdCnts        (int k, int n,       PFC_CNT* cnt){
 	return pread (cntFd, cnt, sizeof(*cnt)*n, k*sizeof(*cnt));
 }
+int       pfcRdMSR         (uint64_t off,       uint64_t* msr){
+	return pread (msrFd, msr, sizeof(*msr), off);
+}
 
 uint64_t  pfcParseCfg      (const char* s){
-	uint64_t     edgeTriggered = 0, evtNum = 0, umaskVal = 0, inv = 0, cmask = 0;
+	uint64_t     edgeTriggered = 0,
+	             evtNum        = 0,
+	             umaskVal      = 0,
+	             user          = 1,
+	             os            = 0,
+	             anythread     = 0,
+	             inv           = 0,
+	             cmask         = 0;
 	int          i             = 0;
+	int          doneModeParsing = 0;
 	const UMASK* umaskList     = NULL;
 	
 	
@@ -547,7 +570,7 @@ uint64_t  pfcParseCfg      (const char* s){
 	while(umaskList[i].name){
 		int n = strlen(umaskList[i].name);
 		if(strncasecmp(s, umaskList[i].name, n) == 0 &&
-		   (s[n] == '\0' || s[n] == '<' || (s[n] == '>' && s[n+1] == '='))){
+		   (s[n] == '\0' || s[n] == '<' || (s[n] == '>' && s[n+1] == '=') || s[n] == ':')){
 			/* Found it. */
 			umaskVal  = umaskList[i].umaskVal;
 			s        += n;
@@ -558,7 +581,7 @@ uint64_t  pfcParseCfg      (const char* s){
 	}
 	if(!umaskList[i].name){
 		umaskVal = strtoull(s, (char**)&s, 0);
-		if(umaskVal > 0xFF || (s[0] != '\0' && s[0] != '<' && !(s[0] == '>' && s[1] == '='))){
+		if(umaskVal > 0xFF || (s[0] != '\0' && s[0] != '<' && !(s[0] == '>' && s[1] == '=') && s[0] != ':')){
 			/* Parsing umask as an integer made no sense. */
 			return 0;
 		}
@@ -568,16 +591,30 @@ uint64_t  pfcParseCfg      (const char* s){
 	 * Parse comparison sign and cmask if available.
 	 */
 	
-	if(s[0] != '\0'){
-		if(s[0] == '>' && s[1] == '=' && isdigit(s[2])){
-			inv   = 0;
-			cmask = strtoull(s+2, NULL, 0) & 0xFF;
-		}else if(s[0] == '<' && isdigit(s[1])){
-			inv   = 1;
-			cmask = strtoull(s+1, NULL, 0) & 0xFF;
-		}else{
-			/* The condition's specification is broken. */
-			return 0;
+	if(s[0] == '>' && s[1] == '=' && isdigit(s[2])){
+		inv   = 0;
+		cmask = strtoull(s+2, (char**)&s, 0) & 0xFF;
+	}else if(s[0] == '<' && isdigit(s[1])){
+		inv   = 1;
+		cmask = strtoull(s+1, (char**)&s, 0) & 0xFF;
+	}
+	
+	/**
+	 * Parse mode bits if available.
+	 */
+	
+	if(s[0] == ':'){
+		anythread = user = os = 0;
+		while(!doneModeParsing){
+			switch(*++s){
+				case 'A':
+				case 'a': anythread       = 1;break;
+				case 'U':
+				case 'u': user            = 1;break;
+				case 'K':
+				case 'k': os              = 1;break;
+				default : doneModeParsing = 1;break;
+			}
 		}
 	}
 	
@@ -588,8 +625,10 @@ uint64_t  pfcParseCfg      (const char* s){
 	PFC_CFG cfg  = (cmask         << 24) |
 	               (inv           << 23) |
 	               (1ULL          << 22) |
+	               (anythread     << 21) |
 	               (edgeTriggered << 18) |
-	               (1ULL          << 16) |
+	               (os            << 17) |
+	               (user          << 16) |
 	               (umaskVal      <<  8) |
 	               (evtNum        <<  0);
 	return cfg;
@@ -647,12 +686,10 @@ void      pfcRemoveBias     (PFC_CNT* b, int64_t mul){
 }
 
 const char *pfcErrorString(int err) {
-    int i;
-    for (i = 0; i < sizeof(AllErrors)/sizeof(AllErrors[0]); i++) {
-        if (AllErrors[i].errorCode == err) {
-            return AllErrors[i].message;
-        }
-    }
-    return "Unknown Error";
+	if(-err >= sizeof(PFC_ERROR_MESSAGES)/sizeof(PFC_ERROR_MESSAGES[0])){
+		return "Unknown Error";
+	}
+	
+	return PFC_ERROR_MESSAGES[-err];
 }
 

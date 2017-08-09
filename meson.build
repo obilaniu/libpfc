@@ -6,5 +6,5 @@ project('libpfc', ['c'],
         default_options:         ['c_std=gnu99'])
 
 subdir('include')
-subdir('src')
 subdir('kmod')
+subdir('src')

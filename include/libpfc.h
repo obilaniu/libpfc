@@ -5,6 +5,7 @@
 
 /* Includes */
 #include <stdint.h>
+#include "libpfcmsr.h"
 
 
 
@@ -12,26 +13,32 @@
 typedef uint64_t  PFC_CFG;
 typedef int64_t   PFC_CNT;
 
-// the next three definitions are the positions of the three fixed counters within
-// the PFC_CNT array
-// See also "Table 18-2. Association of Fixed-Function Performance Counters with Architectural Performance Events"
-// in the Intel SDM Vol 3.
+/**
+ * The next three definitions are the positions of the three fixed counters within
+ * the PFC_CNT array
+ * See also "Table 18-2. Association of Fixed-Function Performance Counters with Architectural Performance Events"
+ * in the Intel SDM Vol 3.
+ */
+
 #define PFC_FIXEDCNT_INSTRUCTIONS_RETIRED 0      /* INST_RETIRED.ANY */
 #define PFC_FIXEDCNT_CPU_CLK_UNHALTED     1      /* CPU_CLK_UNHALTED.THREAD */
 #define PFC_FIXEDCNT_CPU_CLK_REF_TSC      2      /* CPU_CLK_UNHALTED.REF_TSC */
 
-/* Error Codes
+/**
+ * Error Codes
  *
  * Functions that return an int error may return one of the following codes, which can be turned
- * into a human-readable string using pfcErrorString.
+ * into a human-readable string using pfcErrorString().
  */
-#define PFC_ERR_OPENING_SYSFILE (-10) // couldn't open the /sys/modules/pfc files, kernel module probably not loaded
-#define PFC_ERR_PWRITE_FAILED   (-11) // a pwrite() call returned error (check errno?)
-#define PFC_ERR_PWRITE_TOO_FEW  (-12) // a pwrite() call wrote less than the expected number of bytes
-#define PFC_ERR_CPU_PIN_FAILED  (-13) // cpu pinning failed, probably in sched_setaffinity
-#define PFC_ERR_CR4_PCE_NOT_SET (-14) // drive reported that cr4.pce wasn't set, or there was somehow an issue reading it
-#define PFC_ERR_AFFINITY_FAILED (-15) // setting CPU affinity failed (perhaps affinity is set externally excluding CPU 0?)
-#define PFC_ERR_READING_MASKS   (-16) // didn't read the expected number of mask bytes from the sysfs
+
+#define PFC_ERR_OK              (-0) /* OK */
+#define PFC_ERR_OPENING_SYSFILE (-1) /* Couldn't open the /sys/modules/pfc files, kernel module probably not loaded */
+#define PFC_ERR_PWRITE_FAILED   (-2) /* A pwrite() call returned error (check errno?) */
+#define PFC_ERR_PWRITE_TOO_FEW  (-3) /* A pwrite() call wrote less than the expected number of bytes */
+#define PFC_ERR_CPU_PIN_FAILED  (-4) /* CPU pinning failed, probably in sched_setaffinity() */
+#define PFC_ERR_CR4_PCE_NOT_SET (-5) /* Driver reported that cr4.pce wasn't set, or there was somehow an issue reading it */
+#define PFC_ERR_AFFINITY_FAILED (-6) /* Setting CPU affinity failed (perhaps affinity is set externally excluding CPU 0?) */
+#define PFC_ERR_READING_MASKS   (-7) /* Didn't read the expected number of mask bytes from the sysfs */
 
 
 /* Extern "C" Guard */
@@ -65,6 +72,7 @@ int       pfcWrCfgs        (int k, int n, const PFC_CFG* cfg);
 int       pfcRdCfgs        (int k, int n,       PFC_CFG* cfg);
 int       pfcWrCnts        (int k, int n, const PFC_CNT* cnt);
 int       pfcRdCnts        (int k, int n,       PFC_CNT* cnt);
+int       pfcRdMSR         (uint64_t off,       uint64_t* msr);
 
 /**
  * Translate argument to configuration.
@@ -142,8 +150,10 @@ _pfc_asm_code_(op)                              \
 void      pfcRemoveBias     (PFC_CNT* b, int64_t mul);
 
 /**
- * Return a string representation of an error code such as those returned by pfcInit
+ * Return a string representation of a libpfc error code, such as the one
+ * returned by pfcInit().
  */
+
 const char *pfcErrorString(int err);
 
 

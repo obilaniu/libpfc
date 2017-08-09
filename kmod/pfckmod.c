@@ -6,6 +6,7 @@
 #include <linux/module.h>
 #include <linux/sysfs.h>
 #include <linux/smp.h>
+#include "libpfcmsr.h"
 
 
 /* Defines */
@@ -15,16 +16,23 @@
  */
 
 #define MAXPMC                             25
-#define MSR_IA32_PERFEVTSEL0               0x186
-#define MSR_IA32_FIXED_CTR0                0x309
-#define IA32_PERF_CAPABILITIES             0x345
-#define MSR_IA32_FIXED_CTR_CTRL            0x38D
-#define MSR_IA32_PERF_GLOBAL_STATUS        0x38E
-#define MSR_IA32_PERF_GLOBAL_CTRL          0x38F
-#define MSR_IA32_PERF_GLOBAL_OVF_CTRL      0x390
-#define MSR_IA32_A_PMC0                    0x4C1
+
+/**
+ * Conditional logging.
+ */
 
 #define PRINTV(...) if (verbose) { printk(KERN_INFO __VA_ARGS__); }
+
+
+/* Data Structure Typedefs */
+struct CPUID_LEAF;
+typedef struct CPUID_LEAF CPUID_LEAF;
+
+
+/* Data Structure Definitions */
+struct CPUID_LEAF{
+	uint32_t a, b, c, d;
+};
 
 
 /* Forward Declarations */
@@ -58,33 +66,60 @@ static ssize_t pfcCntWr(struct file*          f,
                         char*                 buf,
                         loff_t                off,
                         size_t                len);
-static ssize_t pfcVerboseRd(struct kobject* kobj,
-						struct kobj_attribute* attr,
-						char* buf);
-static ssize_t pfcVerboseWr(struct kobject* kobj,
-						struct kobj_attribute* attr,
-						const char* buf,
-						size_t count);
-static ssize_t pfcCR4PceRd(struct kobject* kobj,
-                        struct kobj_attribute* attr,
-                        char* buf);
+static ssize_t pfcMsrRd (struct file*          f,
+                         struct kobject*       kobj,
+                         struct bin_attribute* binattr,
+                         char*                 buf,
+                         loff_t                off,
+                         size_t                len);
+static ssize_t pfcVerboseRd(struct kobject*        kobj,
+                            struct kobj_attribute* attr,
+                            char*                  buf);
+static ssize_t pfcVerboseWr(struct kobject*        kobj,
+                            struct kobj_attribute* attr,
+                            const char*            buf,
+                            size_t                 count);
+static ssize_t pfcCR4PceRd(struct kobject*         kobj,
+                           struct kobj_attribute*  attr,
+                           char*                   buf);
 static int  __init pfcInit(void);
 static void        pfcExit(void);
 
 
 
 /* Global Variables & Constants */
-static int       pmcArchVer           = 0;
-static int       pmcFf                = 0;
-static int       pmcGp                = 0;
-static int       pmcStartFf           = 0;
-static int       pmcEndFf             = 0;
-static int       pmcStartGp           = 0;
-static int       pmcEndGp             = 0;
-static uint64_t  pmcMaskFf            = 0;
-static uint64_t  pmcMaskGp            = 0;
-static int       fullWidthWrites      = 0;
-static int       verbose              = 0;
+static CPUID_LEAF leaf0                = {0,0,0,0}, /* Highest Value for Basic Processor Information and the Vendor Identification String */
+                  leaf1                = {0,0,0,0}, /* Model, Family, Stepping Information */
+                  leaf6                = {0,0,0,0}, /* Thermal and Power Management Features */
+                  leafA                = {0,0,0,0}, /* Architectural Performance Monitoring Features */
+                  leaf80000000         = {0,0,0,0}, /* Highest Value for Extended Processor Information */
+                  leaf80000001         = {0,0,0,0}, /* Extended Processor Signature & Feature Bits */
+                  leaf80000002         = {0,0,0,0}, /* Processor Brand String 0 */
+                  leaf80000003         = {0,0,0,0}, /* Processor Brand String 1 */
+                  leaf80000004         = {0,0,0,0}; /* Processor Brand String 2 */
+static unsigned   family               = 0;
+static unsigned   model                = 0;
+static unsigned   stepping             = 0;
+static unsigned   exfamily             = 0;
+static unsigned   exmodel              = 0;
+static unsigned   dispFamily           = 0;
+static unsigned   dispModel            = 0;
+static uint32_t   maxLeaf              = 0;
+static uint32_t   maxExtendedLeaf      = 0;
+static char       procBrandString[49]  = {0};
+static int        pmcArchVer           = 0;
+static int        pmcFf                = 0;
+static int        pmcGp                = 0;
+static int        pmcFfBitwidth        = 0;
+static int        pmcGpBitwidth        = 0;
+static uint64_t   pmcFfMask            = 0;
+static uint64_t   pmcGpMask            = 0;
+static int        pmcStartFf           = 0;
+static int        pmcEndFf             = 0;
+static int        pmcStartGp           = 0;
+static int        pmcEndGp             = 0;
+static int        fullWidthWrites      = 0;
+static int        verbose              = 0;
 
 /**
  * The counters consist in the following MSRs on Core i7:
@@ -114,10 +149,16 @@ static const struct bin_attribute   PFC_ATTR_counts     = {
 	.read    = pfcCntRd,
 	.write   = pfcCntWr
 };
+static const struct bin_attribute   PFC_ATTR_msr        = {
+	.attr    = {.name="msr",    .mode=0660},
+	.size    = 0,
+	.read    = pfcMsrRd
+};
 static const struct bin_attribute*  PFC_BIN_ATTR_GRP_LIST[] = {
 	&PFC_ATTR_config,
 	&PFC_ATTR_masks,
 	&PFC_ATTR_counts,
+	&PFC_ATTR_msr,
 	NULL
 };
 
@@ -261,7 +302,7 @@ static void pfcWRMSR(uint64_t addr, uint64_t newVal){
 	         addr <  MSR_IA32_A_PMC0+pmcGp)        ||
 	        (addr >= MSR_IA32_PERFCTR0             &&
 	         addr <  MSR_IA32_PERFCTR0+pmcGp)      ){
-		mask =                                        ~pmcMaskGp;
+		mask =                                        ~pmcGpMask;
 	}else if(addr == MSR_IA32_PERF_GLOBAL_CTRL     ){
 		mask =                   ZV(pmcFf,  32) & ZV(pmcGp,   0);
 	}else if(addr == MSR_IA32_PERF_GLOBAL_STATUS   ){
@@ -272,14 +313,27 @@ static void pfcWRMSR(uint64_t addr, uint64_t newVal){
 		mask =                                    ZV(4*pmcFf, 0);
 	}else if(addr >= MSR_IA32_FIXED_CTR0           &&
 	         addr <  MSR_IA32_FIXED_CTR0 +pmcFf    ){
-		mask =                                        ~pmcMaskFf;
+		mask =                                        ~pmcFfMask;
 	}else if(addr >= MSR_IA32_PERFEVTSEL0          &&
 	         addr <  MSR_IA32_PERFEVTSEL0+pmcGp    ){
 		mask =                                0xFFFFFFFF00000000;
+	}else if(addr == MSR_IA32_THERM_STATUS){
+		mask =                                0xFFFFFFFF0780F000;
+	}else if(addr == MSR_IA32_PACKAGE_THERM_STATUS){
+		mask =                                0xFFFFFFFFFF80F000;
+	}else if(addr == MSR_IA32_TEMPERATURE_TARGET){
+		/**
+		 * On i7-4700MQ,
+		 * 
+		 * - Bits 29-28 are undefined.
+		 * - Bits 15- 8 are, in fact, defined.
+		 */
+		mask =                                0xFFFFFFFFF00000FF;
+	}else if(addr == MSR_CORE_PERF_LIMIT_REASONS){
+		mask =                                0xFFFFFFFF1A90FFFF;
 	}else{
 		return;/* Unknown MSR! Taking no chances! */
 	}
-	
 	
 	
 	/**
@@ -560,7 +614,7 @@ static ssize_t pfcMskRd (struct file*          f,
 		pmcEnd   -= pmcStartFf;
 		
 		for(i=pmcStart;i<pmcEnd;i++,j++){
-			buf64[j] = pmcMaskFf;
+			buf64[j] = pmcFfMask;
 		}
 	}
 	if(pfcClampRange(off>>3, len>>3, pmcStartGp, pmcEndGp, &pmcStart, &pmcEnd)){
@@ -568,7 +622,7 @@ static ssize_t pfcMskRd (struct file*          f,
 		pmcEnd   -= pmcStartGp;
 		
 		for(i=pmcStart;i<pmcEnd;i++,j++){
-			buf64[j] = pmcMaskGp;
+			buf64[j] = pmcGpMask;
 		}
 	}
 	
@@ -672,24 +726,66 @@ static ssize_t pfcCntWr(struct file*          f,
 	return j*sizeof(uint64_t);
 }
 
+/**
+ * Read MSRs from userland.
+ * 
+ * EXTREMELY NASTY AND VERY VERY DANGEROUS HACK. CAN ****EASILY**** TURN INTO
+ * USERLAND-EXPLOITABLE #GP FAULT-GENERATOR DENIAL-OF-SERVICE.
+ * 
+ * @return MSR bytes read
+ */
+
+static ssize_t pfcMsrRd (struct file*          f,
+                         struct kobject*       kobj,
+                         struct bin_attribute* binattr,
+                         char*                 buf,
+                         loff_t                off,
+                         size_t                len){
+	uint64_t v;
+	
+	if(len != 8){
+		return -1;
+	}
+	
+	switch(off){
+		case MSR_CORE_PERF_LIMIT_REASONS:
+			v               = pfcRDMSR(off);
+			*(uint64_t*)buf = v;
+			pfcWRMSR(off, 0);/* Clear all writable log bits. */
+		return len;
+		case MSR_IA32_MISC_ENABLE:
+		case MSR_PLATFORM_INFO:
+		case MSR_IA32_TEMPERATURE_TARGET:
+			*(uint64_t*)buf = pfcRDMSR(off);
+		return len;
+		case MSR_IA32_PACKAGE_THERM_STATUS:
+		case MSR_IA32_PACKAGE_THERM_INTERRUPT:
+			*(uint64_t*)buf = (leaf6.a & (1ULL<<6)) ? pfcRDMSR(off) : 0;
+		return len;
+		default:
+			*(uint64_t*)buf = 0;
+		return -1;
+	}
+}
+
 static ssize_t pfcVerboseRd(struct kobject* kobj,
-						struct kobj_attribute* attr,
-						char* buf) {
+                            struct kobj_attribute* attr,
+                            char* buf) {
 	strcpy(buf, verbose ? "1" : "0");
 	return 1;
 }
 
 static ssize_t pfcCR4PceRd(struct kobject* kobj,
-                        struct kobj_attribute* attr,
-                        char* buf) {
-    strcpy(buf, (native_read_cr4() & 0x00000100L) ? "1" : "0");
-    return 1;
+                           struct kobj_attribute* attr,
+                           char* buf) {
+	strcpy(buf, (native_read_cr4() & 0x00000100L) ? "1" : "0");
+	return 1;
 }
 
 static ssize_t pfcVerboseWr(struct kobject* kobj,
-						struct kobj_attribute* attr,
-						const char* buf,
-						size_t count) {
+                            struct kobj_attribute* attr,
+                            const char* buf,
+                            size_t count) {
 	if (count == 1 || (count == 2 && buf[1] == '\n')) {
 		char value = *buf;
 		if (value == '0' || value == '1') {
@@ -714,22 +810,79 @@ static ssize_t pfcVerboseWr(struct kobject* kobj,
  * as quite a few other things.
  */
 
-static int  pfcInitCPUID(void* unused){
-	uint32_t a,b,c,d;
-	(void)unused;
+static int  pfcInitCPUID(void){
+	/* Perform all CPUID reads we will need. */
+	cpuid_count(0x00000000, 0, &leaf0.a,        &leaf0.b,        &leaf0.c,        &leaf0.d);
+	cpuid_count(0x00000001, 0, &leaf1.a,        &leaf1.b,        &leaf1.c,        &leaf1.d);
+	cpuid_count(0x00000006, 0, &leaf6.a,        &leaf6.b,        &leaf6.c,        &leaf6.d);
+	cpuid_count(0x0000000A, 0, &leafA.a,        &leafA.b,        &leafA.c,        &leafA.d);
+	cpuid_count(0x80000000, 0, &leaf80000000.a, &leaf80000000.b, &leaf80000000.c, &leaf80000000.d);
+	cpuid_count(0x80000001, 0, &leaf80000001.a, &leaf80000001.b, &leaf80000001.c, &leaf80000001.d);
+	cpuid_count(0x80000002, 0, &leaf80000002.a, &leaf80000002.b, &leaf80000002.c, &leaf80000002.d);
+	cpuid_count(0x80000003, 0, &leaf80000003.a, &leaf80000003.b, &leaf80000003.c, &leaf80000003.d);
+	cpuid_count(0x80000004, 0, &leaf80000004.a, &leaf80000004.b, &leaf80000004.c, &leaf80000004.d);
 	
-	/* Check that CPU has performance monitoring. */
-	cpuid_count(0x00000001,0x00000000, &a,&b,&c,&d);
-	if(((c>>15) & 1) == 0){
-		printk(KERN_ERR "ERROR: Processor does not have Perfmon and Debug Capability!\n");
+	family          = (leaf1.a >>  8) & 0x0F;
+	model           = (leaf1.a >>  4) & 0x0F;
+	stepping        = (leaf1.a >>  0) & 0x0F;
+	exmodel         = (leaf1.a >> 16) & 0x0F;
+	exfamily        = (leaf1.a >> 20) & 0xFF;
+	dispFamily      = (        family != 0x0F        ) ? family : (family+exfamily);
+	dispModel       = (family == 0x06 || family==0x0F) ? (exmodel<<4|model) : model;
+	
+	maxLeaf         = leaf0.a;
+	maxExtendedLeaf = leaf80000000.a;
+	memcpy(&procBrandString[ 0], (const char*)&leaf80000002, 16);
+	memcpy(&procBrandString[16], (const char*)&leaf80000003, 16);
+	memcpy(&procBrandString[32], (const char*)&leaf80000004, 16);
+	if(maxExtendedLeaf < 4){
+		strcpy(procBrandString, "(unknown)");
+	}
+	
+	
+	/* And dump the CPUID info to the ring buffer for debug purposes. */
+	if(maxLeaf >= 1){
+		printk(KERN_INFO "pfc: Kernel Module loading on processor %s (Family %u (%X), Model %u (%03X), Stepping %u (%X))\n",
+		       procBrandString, dispFamily, dispFamily, dispModel, dispModel, stepping, stepping);
+	}else{
+		printk(KERN_INFO "pfc: Kernel Module loading on processor %s\n", procBrandString);
+	}
+	printk(KERN_INFO "pfc: cpuid.0x0.0x0:        EAX=%08x, EBX=%08x, ECX=%08x, EDX=%08x\n",
+	       leaf0.a,        leaf0.b,        leaf0.c,        leaf0.d);
+	printk(KERN_INFO "pfc: cpuid.0x1.0x0:        EAX=%08x, EBX=%08x, ECX=%08x, EDX=%08x\n",
+	       leaf1.a,        leaf1.b,        leaf1.c,        leaf1.d);
+	printk(KERN_INFO "pfc: cpuid.0x6.0x0:        EAX=%08x, EBX=%08x, ECX=%08x, EDX=%08x\n",
+	       leaf6.a,        leaf6.b,        leaf6.c,        leaf6.d);
+	printk(KERN_INFO "pfc: cpuid.0xA.0x0:        EAX=%08x, EBX=%08x, ECX=%08x, EDX=%08x\n",
+	       leafA.a,        leafA.b,        leafA.c,        leafA.d);
+	printk(KERN_INFO "pfc: cpuid.0x80000000.0x0: EAX=%08x, EBX=%08x, ECX=%08x, EDX=%08x\n",
+	       leaf80000000.a, leaf80000000.b, leaf80000000.c, leaf80000000.d);
+	printk(KERN_INFO "pfc: cpuid.0x80000001.0x0: EAX=%08x, EBX=%08x, ECX=%08x, EDX=%08x\n",
+	       leaf80000001.a, leaf80000001.b, leaf80000001.c, leaf80000001.d);
+	printk(KERN_INFO "pfc: cpuid.0x80000002.0x0: EAX=%08x, EBX=%08x, ECX=%08x, EDX=%08x\n",
+	       leaf80000002.a, leaf80000002.b, leaf80000002.c, leaf80000002.d);
+	printk(KERN_INFO "pfc: cpuid.0x80000003.0x0: EAX=%08x, EBX=%08x, ECX=%08x, EDX=%08x\n",
+	       leaf80000003.a, leaf80000003.b, leaf80000003.c, leaf80000003.d);
+	printk(KERN_INFO "pfc: cpuid.0x80000004.0x0: EAX=%08x, EBX=%08x, ECX=%08x, EDX=%08x\n",
+	       leaf80000004.a, leaf80000004.b, leaf80000004.c, leaf80000004.d);
+	
+	
+	/* Begin sanity checks. */
+	if(maxLeaf < 0xA){
+		printk(KERN_ERR  "pfc: ERROR: Processor too old!\n");
 		return -1;
 	}
 	
-	/* Check if CPU supports full-width writes */
-	fullWidthWrites = (pfcRDMSR(IA32_PERF_CAPABILITIES) >> 13) & 1;
+	
+	/* Check that CPU has performance monitoring. */
+	if(((leaf1.c>>15) & 1) == 0){
+		printk(KERN_ERR  "pfc: ERROR: Processor does not have Perfmon and Debug Capability!\n");
+		return -1;
+	}
+	
 	
 	/**
-	 * Read CPUID to inform ourselves about PMCs.
+	 * Inform ourselves about PMC support.
 	 *
 	 * PMC information is gotten by CPUID.EAX = 0xA.
 	 * 
@@ -740,25 +893,33 @@ static int  pfcInitCPUID(void* unused){
 	 *     Ff bitwidth                  is in EDX[12: 5] if PMArchVer > 1.
 	 */
 	
-	cpuid_count(0x0000000A,0x00000000, &a,&b,&c,&d);
-	pmcArchVer = (a >>  0) & 0xFF;
-	pmcGp      = (a >>  8) & 0xFF;
-	pmcMaskGp  = (a >> 16) & 0xFF;
-	
-	if(pmcArchVer <= 1){
-		pmcFf     = 0;
-		pmcMaskFf = 0;
-	}else{
-		pmcFf     = (d >>  0) & 0x1F;
-		pmcMaskFf = (d >>  5) & 0xFF;
+	pmcArchVer = (leafA.a >>  0) & 0xFF;
+	if(pmcArchVer < 3 || pmcArchVer > 4){
+		printk(KERN_INFO "pfc: ERROR: Unsupported performance monitoring architecture version %d, only 3 or 4 supported!\n", pmcArchVer);
+		return -1;
 	}
 	
+	fullWidthWrites = (pfcRDMSR(MSR_IA32_PERF_CAPABILITIES) >> 13) & 1;
+	
+	pmcGp         = (leafA.a >>  8) & 0xFF;
+	pmcGpBitwidth = (leafA.a >> 16) & 0xFF;
 	if (fullWidthWrites){
-		pmcMaskGp  = OV(pmcMaskGp,0);
+		pmcGpMask     = OV(pmcGpBitwidth,0);
 	}else{
-		pmcMaskGp  = OV(32,0);
+		pmcGpMask     = OV(32,0);
 	}
-	pmcMaskFf  = OV(pmcMaskFf,0);
+	
+	pmcFf         = (leafA.d >>  0) & 0x1F;
+	pmcFfBitwidth = (leafA.d >>  5) & 0xFF;
+	pmcFfMask     = OV(pmcFfBitwidth,0);
+	
+	
+	/* Save bounds. */
+	pmcStartFf = 0;
+	pmcEndFf   = pmcFf;
+	pmcStartGp = pmcFf;
+	pmcEndGp   = pmcFf+pmcGp;
+	
 	
 	/* Dump out this data */
 	printk(KERN_INFO "pfc: PM Arch Version:      %d\n", pmcArchVer);
@@ -768,14 +929,9 @@ static int  pfcInitCPUID(void* unused){
 		pmcGp = pmcGp>MAXPMC       ?       MAXPMC : pmcGp;
 		pmcFf = pmcGp+pmcFf>MAXPMC ? MAXPMC-pmcGp : pmcFf;
 	}
-	printk(KERN_INFO "pfc: Fixed-function  PMCs: %d\tMask %016llx\n", pmcFf, pmcMaskFf);
-	printk(KERN_INFO "pfc: General-purpose PMCs: %d\tMask %016llx\n", pmcGp, pmcMaskGp);
-
-	/* Save bounds. */
-	pmcStartFf = 0;
-	pmcEndFf   = pmcFf;
-	pmcStartGp = pmcFf;
-	pmcEndGp   = pmcFf+pmcGp;
+	printk(KERN_INFO "pfc: Fixed-function  PMCs: %d\tMask %016llx (%d bits)\n", pmcFf, pmcFfMask, pmcFfBitwidth);
+	printk(KERN_INFO "pfc: General-purpose PMCs: %d\tMask %016llx (%d bits)\n", pmcGp, pmcGpMask, pmcGpBitwidth);
+	
 	
 	return 0;
 }
@@ -815,56 +971,60 @@ static void pfcInitCounters(void* unused){
 static int __init pfcInit(void){
 	int ret;
 	
-	printk(KERN_INFO "pfc: Module loading...\n");
+	
+	if(pfcInitCPUID() != 0){
+		goto fail;
+	}
 	if(!(native_read_cr4() & 0x00000100L)){
 		printk(KERN_INFO "pfc: ERROR: User-space RDPMC not enabled!\n");
 		printk(KERN_INFO "pfc: ERROR: Make sure to execute\n");
 		printk(KERN_INFO "pfc: ERROR:     echo 2 > /sys/bus/event_source/devices/cpu/rdpmc\n");
 		printk(KERN_INFO "pfc: ERROR: as root. This enables ultra-low-overhead, userspace\n");
 		printk(KERN_INFO "pfc: ERROR: access to the performance counters.\n");
-		return -1;
-	}
-	
-	if(pfcInitCPUID(NULL) != 0){
-		return -1;
-	}
-
-	if(pmcArchVer < 3 || pmcArchVer > 4){
-		printk(KERN_INFO "pfc: ERROR: Unsupported performance monitoring architecture version %d, only 3 or 4 supported!\n", pmcArchVer);
-		printk(KERN_INFO "pfc: ERROR: Failed to load module pfc.\n");
-		return -1;
+		goto fail;
 	}
 	
 	on_each_cpu(pfcInitCounters, NULL, 1);
+	
+	/**
+	 * The chmods that follow are necessary because sysfs_create_group()
+	 * doesn't appreciate world-writeable files, but we WANT that for the
+	 * convenience of our users.
+	 */
+	
 	ret  = sysfs_create_group((struct kobject*)&THIS_MODULE->mkobj,
 	                          &PFC_ATTR_GRP);
-#define NONSECURE 1
-#if NONSECURE
 	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
-	                          (struct attribute*)&PFC_ATTR_config, 0666);
+	                          (struct attribute*)&PFC_ATTR_config,  0666);
 	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
-	                          (struct attribute*)&PFC_ATTR_masks,  0444);
+	                          (struct attribute*)&PFC_ATTR_masks,   0444);
 	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
-	                          (struct attribute*)&PFC_ATTR_counts, 0666);
+	                          (struct attribute*)&PFC_ATTR_counts,  0666);
+	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
+	                          (struct attribute*)&PFC_ATTR_msr,     0444);
 	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
 		                      (struct attribute*)&PFC_ATTR_verbose, 0666);
 	ret |= sysfs_chmod_file  ((struct kobject*)  &THIS_MODULE->mkobj,
-	                              (struct attribute*)&PFC_ATTR_cr4pce, 0444);
-#endif
-	
+	                          (struct attribute*)&PFC_ATTR_cr4pce,  0444);
 	if(ret != 0){
 		printk(KERN_INFO "pfc: ERROR: Failed to create sysfs attributes.\n");
-		printk(KERN_INFO "pfc: ERROR: Failed to load module pfc.\n");
-		pfcExit();
-		return -1;
-	}else{
-		printk(KERN_INFO "pfc: Module pfc loaded successfully. Make sure to execute\n");
-		printk(KERN_INFO "pfc:     modprobe -ar iTCO_wdt iTCO_vendor_support\n");
-		printk(KERN_INFO "pfc:     echo 0 > /proc/sys/kernel/nmi_watchdog\n");
-		printk(KERN_INFO "pfc: and blacklist iTCO_vendor_support and iTCO_wdt, since the CR4.PCE register\n");
-		printk(KERN_INFO "pfc: initialization is periodically undone by an unknown agent.\n");
-		return 0;
+		goto lateFail;
 	}
+	
+	
+	printk(KERN_INFO "pfc: Module pfc loaded successfully. Make sure to execute\n");
+	printk(KERN_INFO "pfc:     modprobe -ar iTCO_wdt iTCO_vendor_support\n");
+	printk(KERN_INFO "pfc:     echo 0 > /proc/sys/kernel/nmi_watchdog\n");
+	printk(KERN_INFO "pfc: and blacklist iTCO_vendor_support and iTCO_wdt, since the CR4.PCE register\n");
+	printk(KERN_INFO "pfc: initialization is periodically undone by an unknown agent.\n");
+	return 0;
+	
+	
+	lateFail:
+	pfcExit();
+	fail:
+	printk(KERN_INFO "pfc: ERROR: Failed to load module pfc.\n");
+	return -1;
 }
 
 /**
@@ -893,114 +1053,6 @@ MODULE_DESCRIPTION("Grants ***EXTREMELY UNSAFE*** access to the Intel Performanc
 
 
 /* Notes */
-
-/** 186+x IA32_PERFEVTSELx           -  Performance Event Selection, ArchPerfMon v3
- * 
- *                     /63/60 /56     /48     /40     /32     /24     /16     /08     /00
- *                    {................................################################}
- *                                                     |      ||||||||||      ||      |
- *     Counter Mask -----------------------------------^^^^^^^^|||||||||      ||      |
- *     Invert Counter Mask ------------------------------------^||||||||      ||      |
- *     Enable Counter ------------------------------------------^|||||||      ||      |
- *     AnyThread ------------------------------------------------^||||||      ||      |
- *     APIC Interrupt Enable -------------------------------------^|||||      ||      |
- *     Pin Control ------------------------------------------------^||||      ||      |
- *     Edge Detect -------------------------------------------------^|||      ||      |
- *     Operating System Mode ----------------------------------------^||      ||      |
- *     User Mode -----------------------------------------------------^|      ||      |
- *     Unit Mask (UMASK) ----------------------------------------------^^^^^^^^|      |
- *     Event Select -----------------------------------------------------------^^^^^^^^
- */
-/** 309+x IA32_FIXED_CTRx            -  Fixed-Function Counter,      ArchPerfMon v3
- * 
- *                     /63/60 /56     /48     /40     /32     /24     /16     /08     /00
- *                    {????????????????????????????????????????????????????????????????}
- *                     |                                                              |
- *     Counter Value --^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- *     
- *     NB: Number of FF counters determined by    CPUID.0x0A.EDX[ 4: 0]
- *     NB: ???? FF counter bitwidth determined by CPUID.0x0A.EDX[12: 5]
- */
- /** 345   IA32_PERF_CAPABILITIES     -  Performance Capabilities Enumeration
- * 
- *                     /63/60 /56     /48     /40     /32     /24     /16     /08     /00
- *                    {..................................................##############}
- *                                                                       |||  ||||    |
- *     Full-Width Write -------------------------------------------------^||  ||||    |
- *     SMM Freeze --------------------------------------------------------^|  ||||    |
- *     PEBS Record Format -------------------------------------------------^^^^|||    |
- *     PEBS Arch Regs ---------------------------------------------------------^||    |
- *     PEBS Trap ---------------------------------------------------------------^|    |
- *     LBR Format ---------------------------------------------------------------^^^^^^
- */
-/** 38D   IA32_FIXED_CTR_CTRL        -  Fixed Counter Controls,      ArchPerfMon v3
- * 
- *                     /63/60 /56     /48     /40     /32     /24     /16     /08     /00
- *                    {....................................................############}
- *                                                                         |  ||  |||||
- *     IA32_FIXED_CTR2 controls  ------------------------------------------^^^^|  |||||
- *     IA32_FIXED_CTR1 controls  ----------------------------------------------^^^^||||
- *                                                                                 ||||
- *     IA32_FIXED_CTR0 controls:                                                   ||||
- *     IA32_FIXED_CTR0 PMI --------------------------------------------------------^|||
- *     IA32_FIXED_CTR0 AnyThread ---------------------------------------------------^||
- *     IA32_FIXED_CTR0 enable (0:Disable 1:OS 2:User 3:All) -------------------------^^
- */
-/** 38E   IA32_PERF_GLOBAL_STATUS    -  Global Overflow Status,      ArchPerfMon v3
- * 
- *                  /63/60 /56     /48     /40     /32     /24     /16     /08     /00
- *                 {###..........................###............................####}
- *                  |||                          |||                            ||||
- *     CondChgd ----^||                          |||                            ||||
- *     OvfDSBuffer --^|                          |||                            ||||
- *     OvfUncore -----^                          |||                            ||||
- *     IA32_FIXED_CTR2 Overflow -----------------^||                            ||||
- *     IA32_FIXED_CTR1 Overflow ------------------^|                            ||||
- *     IA32_FIXED_CTR0 Overflow -------------------^                            ||||
- *     IA32_PMC(N-1)   Overflow ------------------------------------------------^|||
- *     ....                     -------------------------------------------------^||
- *     IA32_PMC1       Overflow --------------------------------------------------^|
- *     IA32_PMC0       Overflow ---------------------------------------------------^
- */
-/** 38F   IA32_PERF_GLOBAL_CTRL      -  Global Enable Controls,      ArchPerfMon v3
- * 
- *                     /63/60 /56     /48     /40     /32     /24     /16     /08     /00
- *                    {.............................###............................####}
- *                                                  |||                            ||||
- *     IA32_FIXED_CTR2 enable ----------------------^||                            ||||
- *     IA32_FIXED_CTR1 enable -----------------------^|                            ||||
- *     IA32_FIXED_CTR0 enable ------------------------^                            ||||
- *     IA32_PMC(N-1)   enable -----------------------------------------------------^|||
- *     ....                   ------------------------------------------------------^||
- *     IA32_PMC1       enable -------------------------------------------------------^|
- *     IA32_PMC0       enable --------------------------------------------------------^
- */
-/** 390   IA32_PERF_GLOBAL_OVF_CTRL  -  Global Overflow Control,     ArchPerfMon v3
- * 
- *                     /63/60 /56     /48     /40     /32     /24     /16     /08     /00
- *                    {###..........................###............................####}
- *                     |||                          |||                            ||||
- *     ClrCondChgd ----^||                          |||                            ||||
- *     ClrOvfDSBuffer --^|                          |||                            ||||
- *     ClrOvfUncore -----^                          |||                            ||||
- *     IA32_FIXED_CTR2 ClrOverflow -----------------^||                            ||||
- *     IA32_FIXED_CTR1 ClrOverflow ------------------^|                            ||||
- *     IA32_FIXED_CTR0 ClrOverflow -------------------^                            ||||
- *     IA32_PMC(N-1)   ClrOverflow ------------------------------------------------^|||
- *     ....                        -------------------------------------------------^||
- *     IA32_PMC1       ClrOverflow --------------------------------------------------^|
- *     IA32_PMC0       ClrOverflow ---------------------------------------------------^
- */
-/** 4C1+x IA32_A_PMCx                -  General-Purpose Counter,     ArchPerfMon v3
- * 
- *                     /63/60 /56     /48     /40     /32     /24     /16     /08     /00
- *                    {????????????????????????????????????????????????????????????????}
- *                     |                                                              |
- *     Counter Value --^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- *     
- *     NB: Number of GP counters determined by    CPUID.0x0A.EAX[15: 8]
- *     NB: ???? GP counter bitwidth determined by CPUID.0x0A.EAX[23:16]
- */
 
 /**
  * Possibly required boot args:
