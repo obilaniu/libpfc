@@ -9,10 +9,9 @@ libpfcSrcs = files(
 # To be reviewed:
 #
 cc   = meson.get_compiler('c')
-mDep = cc.find_library('m', required : false)
-#    executable(..., dependencies : m_dep)
+mDep = cc .find_library('m', required : false)
 
-libpfcDeps = []
+libpfcDeps = [mDep]
 libpfcIncs = [libpfcIncs, kmodIncs]
 
 libpfc = library('pfc', libpfcSrcs,
@@ -21,7 +20,7 @@ libpfc = library('pfc', libpfcSrcs,
                  install:             true)
 
 
-# Demo application
+# Demo applications
 pfcdemoSrcs = files('pfcdemo.c')
 pfcdemoDeps = [mDep]
 
@@ -29,5 +28,15 @@ pfcdemo = executable('pfcdemo', pfcdemoSrcs,
                      include_directories: libpfcIncs,
                      link_with:           [libpfc],
                      dependencies:        pfcdemoDeps,
-                     install:             true,
-                     extra_files:         '../include/libpfc.h')
+                     install:             true)
+
+
+reftscdemoSrcs = files('reftscdemo.cpp')
+reftscdemoDeps = [mDep]
+
+reftscdemo = executable('reftscdemo', reftscdemoSrcs,
+                        include_directories: libpfcIncs,
+                        link_with:           [libpfc],
+                        dependencies:        reftscdemoDeps,
+                        install:             true)
+
