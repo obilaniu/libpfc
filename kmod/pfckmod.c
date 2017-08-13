@@ -333,6 +333,8 @@ static void pfcWRMSR(uint64_t addr, uint64_t newVal){
 		mask =                                0xFFFFFFFF1A90FFFF;
 	}else if(addr == MSR_IA32_ENERGY_PERF_BIAS){
 		mask =                                0xFFFFFFFFFFFFFFF0;
+	}else if(addr == MSR_IA32_PERF_CTL){
+		mask =                                0xFFFFFFFFFFFF0000;
 	}else{
 		return;/* Unknown MSR! Taking no chances! */
 	}
@@ -755,6 +757,8 @@ static ssize_t pfcMsrRd (struct file*          f,
 			*(uint64_t*)buf = v;
 			pfcWRMSR(off, 0);/* Clear all writable log bits. */
 		return len;
+		case MSR_IA32_PERF_STATUS:
+		case MSR_IA32_PERF_CTL:
 		case MSR_IA32_MISC_ENABLE:
 		case MSR_PLATFORM_INFO:
 		case MSR_IA32_TEMPERATURE_TARGET:

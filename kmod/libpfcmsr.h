@@ -14,6 +14,12 @@
 #ifndef MSR_IA32_PERFEVTSEL0
 #define MSR_IA32_PERFEVTSEL0               0x186
 #endif
+#ifndef MSR_IA32_PERF_STATUS
+#define MSR_IA32_PERF_STATUS               0x198
+#endif
+#ifndef MSR_IA32_PERF_CTL
+#define MSR_IA32_PERF_CTL                  0x199
+#endif
 #ifndef MSR_IA32_CLOCK_MODULATION
 #define MSR_IA32_CLOCK_MODULATION          0x19A
 #endif
