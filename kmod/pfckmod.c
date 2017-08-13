@@ -331,6 +331,8 @@ static void pfcWRMSR(uint64_t addr, uint64_t newVal){
 		mask =                                0xFFFFFFFFF00000FF;
 	}else if(addr == MSR_CORE_PERF_LIMIT_REASONS){
 		mask =                                0xFFFFFFFF1A90FFFF;
+	}else if(addr == MSR_IA32_ENERGY_PERF_BIAS){
+		mask =                                0xFFFFFFFFFFFFFFF0;
 	}else{
 		return;/* Unknown MSR! Taking no chances! */
 	}
@@ -760,7 +762,20 @@ static ssize_t pfcMsrRd (struct file*          f,
 		return len;
 		case MSR_IA32_PACKAGE_THERM_STATUS:
 		case MSR_IA32_PACKAGE_THERM_INTERRUPT:
-			*(uint64_t*)buf = (leaf6.a & (1ULL<<6)) ? pfcRDMSR(off) : 0;
+			if(leaf6.a & (1ULL<<6)){
+				*(uint64_t*)buf = pfcRDMSR(off);
+			}else{
+				*(uint64_t*)buf = 0;
+				return -1;
+			}
+		return len;
+		case MSR_IA32_ENERGY_PERF_BIAS:
+			if(leaf6.c & (1ULL<<3)){
+				*(uint64_t*)buf = pfcRDMSR(off);
+			}else{
+				*(uint64_t*)buf = 0;
+				return -1;
+			}
 		return len;
 		default:
 			*(uint64_t*)buf = 0;

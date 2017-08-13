@@ -45,8 +45,11 @@ int64_t nanos(){
  */
 
 int main(int argc, char* argv[]){
-	uint64_t CALIBRATION_NANOS = 1000000000, CALIBRATION_ADDS;
+	uint64_t CALIBRATION_NANOS = 1000000000,
+	         CALIBRATION_ITERS = 100,
+	         CALIBRATION_ADDS;
 	int      CORE              = 0;
+	FILE*    LOG               = NULL;
 	int      i, ret, isterminal = isatty(1);
 	uint64_t maxNonTurbo = 0;
 	uint64_t miscEn = 0, platInfo = 0, tempTarget = 0,
@@ -64,13 +67,21 @@ int main(int argc, char* argv[]){
 			exit(0);
 		}else if(strcmp(argv[i], "--nanos") == 0 && argv[++i]){
 			CALIBRATION_NANOS = strtoull(argv[i], 0, 0);
+		}else if(strcmp(argv[i], "--iters") == 0 && argv[++i]){
+			CALIBRATION_ITERS = strtoull(argv[i], 0, 0);
 		}else if(strcmp(argv[i], "--core")  == 0 && argv[++i]){
 			CORE              = strtoull(argv[i], 0, 0);
+		}else if(strcmp(argv[i], "--log")   == 0 && argv[++i]){
+			LOG               = fopen(argv[i], "a");
+			if(!LOG){
+				printf("Could not open %s, exiting.\n", argv[i]);
+				exit(-1);
+			}
 		}
 	}
 	
 	
-	/* libpfc */
+	/* Initialization of libpfc */
 	pfcPinThread(CORE);
 	ret = pfcInit();
 	if(ret != 0){
@@ -118,7 +129,7 @@ int main(int argc, char* argv[]){
 	
 	
 	/* Periodically dump the synchronized measurements of several counters, timers and MSRs. */
-	for(i=0;i<100;i++){
+	for(i=0;i<(int)CALIBRATION_ITERS;i++){
 		memset(cnt, 0, sizeof(cnt));
 		int64_t start = nanos(), now;
 		PFCSTART(cnt);
@@ -143,7 +154,7 @@ int main(int argc, char* argv[]){
 		printf("CPU %d, ratio rdtsc   :ref_xclk         : %16.8f\n",  sched_getcpu(), (double)tsc_delta/cnt[3]);
 		printf("CPU %d, core CLK cycles in OS           : %16llu\n",  sched_getcpu(), (unsigned long long)(cnt[4]));
 		printf("CPU %d, User-OS transitions             : %16llu\n",  sched_getcpu(), (unsigned long long)(cnt[5]));
-		printf("CPU %d, rdtsc-reftsc overcount          : %16llu\n",  sched_getcpu(), (unsigned long long)(tsc_delta - cnt[PFC_FIXEDCNT_CPU_CLK_REF_TSC]));
+		printf("CPU %d, rdtsc-reftsc overcount          : %16lld\n",  sched_getcpu(), (signed   long long)(tsc_delta - cnt[PFC_FIXEDCNT_CPU_CLK_REF_TSC]));
 		printf("CPU %d, MSR_IA32_PACKAGE_THERM_STATUS   : %016llx\n", sched_getcpu(), (unsigned long long)pkgThermStatus);
 		printf("CPU %d, MSR_IA32_PACKAGE_THERM_INTERRUPT: %016llx\n", sched_getcpu(), (unsigned long long)pkgThermInterrupt);
 		printf("CPU %d, MSR_CORE_PERF_LIMIT_REASONS     : %016llx\n", sched_getcpu(), (unsigned long long)throttleReason);
@@ -158,7 +169,17 @@ int main(int argc, char* argv[]){
 		printf("      %sPackage-Level PL2 Power Limiting%s\n",               throttleReason & 0x08000000 ? startDel : "  ", throttleReason & 0x08000000 ? endDel : "");
 		printf("      %sMax Turbo Limit (Multi-Core Turbo)%s\n",             throttleReason & 0x10000000 ? startDel : "  ", throttleReason & 0x10000000 ? endDel : "");
 		printf("      %sTurbo Transition Attenuation%s\n",                   throttleReason & 0x20000000 ? startDel : "  ", throttleReason & 0x20000000 ? endDel : "");
+		
+		fprintf(LOG, "%.2f,%.2f,%.2f,%lld,%llu,%llu\n",
+		        (double)cnt[PFC_FIXEDCNT_CPU_CLK_REF_TSC]/cnt[3],
+		        (double)cnt[PFC_FIXEDCNT_CPU_CLK_UNHALTED]/cnt[3],
+		        (double)tsc_delta/cnt[3],
+		        (signed   long long)(tsc_delta - cnt[PFC_FIXEDCNT_CPU_CLK_REF_TSC]),
+		        (unsigned long long)(cnt[4]),
+		        (unsigned long long)(cnt[5]));
 	}
+	fflush(LOG);
+	fclose(LOG);
 	
 	return 0;
 }

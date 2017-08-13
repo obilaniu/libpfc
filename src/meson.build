@@ -20,7 +20,20 @@ libpfc = library('pfc', libpfcSrcs,
                  install:             true)
 
 
+
+# Utilities
+pfcutilSrcs = files('pfcutil.c')
+pfcutilDeps = [mDep]
+pfcutil = executable('pfcutil', pfcutilSrcs,
+                     include_directories: libpfcIncs,
+                     link_with:           [libpfc],
+                     dependencies:        pfcutilDeps,
+                     install:             true)
+
+
 # Demo applications
+
+# Simple FMA+VPADDD loop
 pfcdemoSrcs = files('pfcdemo.c')
 pfcdemoDeps = [mDep]
 
@@ -31,12 +44,25 @@ pfcdemo = executable('pfcdemo', pfcdemoSrcs,
                      install:             true)
 
 
-reftscdemoSrcs = files('reftscdemo.cpp')
-reftscdemoDeps = [mDep]
+# A much more complicated example to analyze the behaviour of cycle counters
+# under TurboBoost.
+pfcdemoreftscSrcs = files('pfcdemoreftsc.cpp')
+pfcdemoreftscDeps = [mDep]
 
-reftscdemo = executable('reftscdemo', reftscdemoSrcs,
-                        include_directories: libpfcIncs,
-                        link_with:           [libpfc],
-                        dependencies:        reftscdemoDeps,
-                        install:             true)
+pfcdemoreftsc = executable('pfcdemoreftsc', pfcdemoreftscSrcs,
+                           include_directories: libpfcIncs,
+                           link_with:           [libpfc],
+                           dependencies:        pfcdemoreftscDeps,
+                           install:             true)
+
+
+# Determine the TurboBoost hits.
+pfctbhitSrcs = files('pfctbhit.c', 'pfctbhitasm.S')
+pfctbhitDeps = [mDep]
+
+pfctbhit = executable('pfctbhit', pfctbhitSrcs,
+                     include_directories: libpfcIncs,
+                     link_with:           [libpfc],
+                     dependencies:        pfctbhitDeps,
+                     install:             true)
 
