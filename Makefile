@@ -7,12 +7,12 @@
 vpath %.c src
 vpath %.h include
 
-CFLAGS += -Wall -Winvalid-pch -O0 -g -Iinclude -std=gnu99
+CFLAGS += -Wall -Winvalid-pch -O0 -g -Iinclude -Ikmod -std=gnu99
 SHAREDLIB_FLAGS = -Wl,--no-undefined -Wl,--as-needed -shared -fPIC -Wl,-soname,libpfc.so '-Wl,-rpath,$$ORIGIN/'
 
 all : libpfc.so pfcdemo pfc.ko
 
-libpfc.o : libpfc.c libpfc.h
+libpfc.o : libpfc.c libpfc.h kmod/libpfcmsr.h
 	$(CC) $(CFLAGS) -fPIC -c $< -o libpfc.o
 
 libpfc.so : libpfc.o
