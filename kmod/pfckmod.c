@@ -335,6 +335,8 @@ static void pfcWRMSR(uint64_t addr, uint64_t newVal){
 		mask =                                0xFFFFFFFFFFFFFFF0;
 	}else if(addr == MSR_IA32_PERF_CTL){
 		mask =                                0xFFFFFFFFFFFF0000;
+	}else if(addr == MSR_PEBS_FRONTEND){
+		mask =                                0xFFFFFFFFFFC000E8;
 	}else{
 		return;/* Unknown MSR! Taking no chances! */
 	}
@@ -780,6 +782,18 @@ static ssize_t pfcMsrRd (struct file*          f,
 				*(uint64_t*)buf = 0;
 				return -1;
 			}
+		return len;
+		case MSR_PEBS_FRONTEND:
+			/**
+			 * It's technically only available on some Skylake+ processors, but
+			 * it's almost impossible to keep a pretty, up-to-date list of
+			 * CPUID families that are compatible.
+			 * 
+			 * Trust that the user knows what he's doing. The Doxygen for this
+			 * function does warn about the extreme lack of safety.
+			 */
+			
+			*(uint64_t*)buf = pfcRDMSR(off);
 		return len;
 		default:
 			*(uint64_t*)buf = 0;

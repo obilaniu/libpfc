@@ -62,6 +62,9 @@
 #ifndef MSR_IA32_PERF_GLOBAL_OVF_CTRL
 #define MSR_IA32_PERF_GLOBAL_OVF_CTRL      0x390
 #endif
+#ifndef MSR_PEBS_FRONTEND
+#define MSR_PEBS_FRONTEND                  0x3F7
+#endif
 #ifndef MSR_IA32_A_PMC0
 #define MSR_IA32_A_PMC0                    0x4C1
 #endif
@@ -177,6 +180,16 @@
  *     ....                        -------------------------------------------------^||
  *     IA32_PMC1       ClrOverflow --------------------------------------------------^|
  *     IA32_PMC0       ClrOverflow ---------------------------------------------------^
+ */
+/** 3F7   MSR_PEBS_FRONTEND          -  Front-End Precise Event Condition Select,    ArchPerfMon v4
+ * 
+ *                     /63/60 /56     /48     /40     /32     /24     /16     /08     /00
+ *                    {.........................................###############...#.###}
+ *                                                              | ||          |   | | |
+ *     IDQ Bubble Width  Specifier -----------------------------^^^|          |   | | |
+ *     IDQ Bubble Length Specifier --------------------------------^^^^^^^^^^^^   | | |
+ *     Event Code Select High      -----------------------------------------------^ | |
+ *     Event Code Select           -------------------------------------------------^^^
  */
 /** 4C1+x IA32_A_PMCx                -  General-Purpose Counter,     ArchPerfMon v3
  * 
