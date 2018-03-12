@@ -21,12 +21,10 @@ extern "C" void add_calibration(uint64_t x);
 asm volatile(
 ".text\n\t"
 ".global add_calibration\n\t"
-".intel_syntax noprefix\n\t"
 "add_calibration:\n\t"
-"sub rdi, 1\n\t"
+"sub $1, %rdi\n\t"
 "jnz add_calibration\n\t"
 "ret\n\t"
-".att_syntax noprefix\n\t"
 );
 
 

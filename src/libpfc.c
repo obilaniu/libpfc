@@ -669,10 +669,8 @@ void      pfcRemoveBias     (PFC_CNT* b, int64_t mul){
 		
 		memset(warmup, 0, sizeof(warmup));
 		asm volatile(
-		"\n\t.intel_syntax noprefix                  "
 		_pfc_asm_code_(add)
 		_pfc_asm_code_(sub)
-		"\n\t.att_syntax noprefix                    "
 		:               /* Outputs */
 		: "r"((warmup)) /* Inputs */
 		: "memory", "rax", "rcx", "rdx"

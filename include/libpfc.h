@@ -92,11 +92,13 @@ void      pfcDumpEvts      (void);
  *********************/
 
 #define _pfc_asm_code_cnt_read_(op, rcx, off)   \
-"\n\tmov      rcx, "#rcx"                    "  \
+"\n\tmov      $"#rcx", %%rcx                 "  \
 "\n\trdpmc                                   "  \
-"\n\tshl      rdx, 32                        "  \
-"\n\tor       rdx, rax                       "  \
-"\n\t"#op"    qword ptr [%0 +   "#off"], rdx "
+"\n\tshl      $32,     %%rdx                 "  \
+"\n\tor       %%rax,   %%rdx                 "  \
+"\n\t"#op"    %%rdx,   "#off"(%0)            "  \
+"\n\t"
+
 
 #define _pfc_asm_code_(op)                      \
 "\n\tlfence                                  "  \
@@ -111,9 +113,7 @@ _pfc_asm_code_cnt_read_(op, 0x00000003, 48)     \
 
 #define _pfc_macro_(b, op)                      \
 asm volatile(                                   \
-"\n\t.intel_syntax noprefix                  "  \
 _pfc_asm_code_(op)                              \
-"\n\t.att_syntax noprefix                    "  \
 :        /* Outputs */                          \
 : "r"((b)) /* Inputs */                         \
 : "memory", "rax", "rcx", "rdx"                 \
