@@ -1,7 +1,6 @@
 # This folder contains the sources to the kernel module. It is self-contained.
 
-kmodIncs = include_directories('.')
-install_headers('libpfcmsr.h')
+kmodIncs = include_directories('../include')
 kmodSrcs = files('pfckmod.c', 'Makefile', 'mesonbuildkmod.sh')
 
 
