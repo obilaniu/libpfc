@@ -1,0 +1,3 @@
+obj-m += pfc.o
+pfc-y += pfckmod.o
+ccflags-y += -I$(src)/../include
