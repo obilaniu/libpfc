@@ -1,0 +1,30 @@
+language: c
+sudo: required
+
+addons:
+  apt:
+    sources:
+      - deadsnakes
+    packages:
+      - linux-headers-4.4.0-101-generic
+      - python3.6
+      - python3.6-dev
+      
+matrix:
+  include:
+    - env: BUILD=MAKE
+      script:
+      - make
+    - env: BUILD=meson
+      install:
+        - mkdir build
+        - export PATH="`pwd`/build:${PATH}"
+        - wget https://github.com/ninja-build/ninja/releases/download/v1.7.2/ninja-linux.zip && unzip -q ninja-linux.zip -d build
+        - curl https://bootstrap.pypa.io/get-pip.py | sudo python3.6
+        - sudo python3.6 -m pip install meson
+        - meson --version
+      script:
+        - uname -r && cd build && meson .. -Dbuildtype=release --prefix=$HOME/.local
+        - ninja
+        - ninja install
+
