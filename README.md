@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/obilaniu/libpfc.svg?branch=master)](https://travis-ci.org/obilaniu/libpfc)
+
 # libpfc
 
 _A small library and kernel module for easy access to x86 performance monitor counters under Linux._
