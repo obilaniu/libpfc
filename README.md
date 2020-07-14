@@ -106,7 +106,7 @@ Therefore, to measure a snippet of code, one does as follows:
     /**** END HOT SECTION ****/
     
     /* Bias compensation */
-    pfcRemoveBias(cnts);
+    pfcRemoveBias(cnts, 1);
     
     /* Use values in cnts[0..6]. */
 ```
